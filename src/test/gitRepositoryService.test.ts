@@ -66,6 +66,66 @@ describe("GitRepositoryService", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("throws a typed error when git rejects an unsafe repository", async () => {
+    const repositoryRoot = await createTempDirectory("git-repo-service-unsafe-");
+    tempDirectories.push(repositoryRoot);
+
+    await mkdir(join(repositoryRoot, ".git"));
+
+    const nestedFile = join(repositoryRoot, "conflict.txt");
+    await writeFile(nestedFile, "content", "utf8");
+
+    const service = new GitRepositoryService({
+      runGit: vi.fn().mockRejectedValue(
+        new GitCommandError(
+          ["-C", repositoryRoot, "rev-parse", "--show-toplevel"],
+          128,
+          "fatal: detected dubious ownership in repository",
+        ),
+      ),
+    });
+
+    await expect(
+      service.findRepositoryRoot(pathToFileURL(nestedFile).toString()),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof GitServiceError &&
+        error.code === "git-command-failed" &&
+        error.operation === "findRepositoryRoot",
+    );
+  });
+
+  it("throws a typed error when git cannot access a repository candidate", async () => {
+    const repositoryRoot = await createTempDirectory(
+      "git-repo-service-permission-denied-",
+    );
+    tempDirectories.push(repositoryRoot);
+
+    await mkdir(join(repositoryRoot, ".git"));
+
+    const nestedFile = join(repositoryRoot, "conflict.txt");
+    await writeFile(nestedFile, "content", "utf8");
+
+    const service = new GitRepositoryService({
+      runGit: vi.fn().mockRejectedValue(
+        new GitCommandError(
+          ["-C", repositoryRoot, "rev-parse", "--show-toplevel"],
+          128,
+          "fatal: cannot change to '/restricted/path': Permission denied",
+        ),
+      ),
+    });
+
+    await expect(
+      service.findRepositoryRoot(pathToFileURL(nestedFile).toString()),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof GitServiceError &&
+        error.code === "git-command-failed" &&
+        error.operation === "findRepositoryRoot",
+    );
+  });
+
   it("maps NUL-delimited unmerged records into unique repository-relative paths", async () => {
     const repositoryRoot = join(tmpdir(), "repo root");
     const runGit: GitCommandRunner = vi

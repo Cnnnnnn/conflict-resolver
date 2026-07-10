@@ -7,11 +7,6 @@ import { promisify } from "node:util";
 import type { GitUnmergedFile } from "./types";
 
 const execFileAsync = promisify(execFile);
-const NOT_A_REPOSITORY_PATTERNS = [
-  "not a git repository",
-  "cannot change to",
-  "unsafe repository",
-] as const;
 
 type GitCommandResult = {
   stdout: string;
@@ -84,6 +79,19 @@ export class GitServiceError extends Error {
 
 function isGitCommandError(error: unknown): error is GitCommandError {
   return error instanceof GitCommandError;
+}
+
+function hasCode(
+  error: unknown,
+  ...codes: readonly string[]
+): error is NodeJS.ErrnoException {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    codes.includes(error.code)
+  );
 }
 
 function createGitCommandRunner(): GitCommandRunner {
@@ -189,14 +197,48 @@ async function resolveCandidatePath(uri: string): Promise<string> {
   try {
     const candidateStat = await stat(filesystemPath);
     return candidateStat.isDirectory() ? filesystemPath : dirname(filesystemPath);
-  } catch {
-    return dirname(filesystemPath);
+  } catch (error) {
+    if (hasCode(error, "ENOENT", "ENOTDIR")) {
+      return dirname(filesystemPath);
+    }
+
+    throw error;
   }
 }
 
-function isNotRepositoryError(error: GitCommandError): boolean {
-  const stderr = error.stderr.toLowerCase();
-  return NOT_A_REPOSITORY_PATTERNS.some((pattern) => stderr.includes(pattern));
+async function hasRepositoryMarkerInAncestors(
+  candidatePath: string,
+): Promise<boolean> {
+  let currentPath = resolve(candidatePath);
+
+  while (true) {
+    try {
+      await stat(resolve(currentPath, ".git"));
+      return true;
+    } catch (error) {
+      if (!hasCode(error, "ENOENT", "ENOTDIR")) {
+        throw error;
+      }
+    }
+
+    const parentPath = dirname(currentPath);
+    if (parentPath === currentPath) {
+      return false;
+    }
+
+    currentPath = parentPath;
+  }
+}
+
+async function isNotRepositoryResult(
+  candidatePath: string,
+  error: GitCommandError,
+): Promise<boolean> {
+  if (error.exitCode !== 128) {
+    return false;
+  }
+
+  return !(await hasRepositoryMarkerInAncestors(candidatePath));
 }
 
 export class GitRepositoryService {
@@ -233,11 +275,11 @@ export class GitRepositoryService {
       const repositoryRoot = result.stdout.trim();
       return repositoryRoot.length > 0 ? repositoryRoot : undefined;
     } catch (error) {
-      if (isGitCommandError(error) && isNotRepositoryError(error)) {
-        return undefined;
-      }
-
       if (isGitCommandError(error)) {
+        if (await isNotRepositoryResult(candidatePath, error)) {
+          return undefined;
+        }
+
         throw mapGitCommandError("findRepositoryRoot", error);
       }
 
