@@ -4,3 +4,7 @@ vitest.config.ts
 .superpowers/**
 docs/**
 node_modules/**
+dist/test/**
+**/*.map
+.token-savior-cache.json
+*.vsix
