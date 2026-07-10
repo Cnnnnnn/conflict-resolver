@@ -238,6 +238,16 @@ async function isNotRepositoryResult(
     return false;
   }
 
+  const stderr = error.stderr.trim();
+  const isKnownNotRepositoryFailure =
+    /^fatal: not a git repository(?: \(or any of the parent directories\): \.git)?$/m.test(
+      stderr,
+    );
+
+  if (!isKnownNotRepositoryFailure) {
+    return false;
+  }
+
   return !(await hasRepositoryMarkerInAncestors(candidatePath));
 }
 
@@ -273,8 +283,21 @@ export class GitRepositoryService {
       ]);
 
       const repositoryRoot = result.stdout.trim();
-      return repositoryRoot.length > 0 ? repositoryRoot : undefined;
+      if (repositoryRoot.length === 0) {
+        throw new GitServiceError(
+          "invalid-git-output",
+          "findRepositoryRoot",
+          "Git rev-parse returned an empty repository root",
+          { args: ["-C", candidatePath, "rev-parse", "--show-toplevel"], uri },
+        );
+      }
+
+      return repositoryRoot;
     } catch (error) {
+      if (error instanceof GitServiceError) {
+        throw error;
+      }
+
       if (isGitCommandError(error)) {
         if (await isNotRepositoryResult(candidatePath, error)) {
           return undefined;

@@ -66,6 +66,64 @@ describe("GitRepositoryService", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("treats unrelated exit-128 stderr without a .git ancestor as a typed GitServiceError", async () => {
+    const directory = await createTempDirectory(
+      "git-repo-service-unrelated-exit-128-",
+    );
+    tempDirectories.push(directory);
+
+    const nestedFile = join(directory, "space name", "子目录", "conflict.txt");
+    await mkdir(dirname(nestedFile), { recursive: true });
+    await writeFile(nestedFile, "content", "utf8");
+
+    const candidatePath = dirname(nestedFile);
+    const service = new GitRepositoryService({
+      runGit: vi.fn().mockRejectedValue(
+        new GitCommandError(
+          ["-C", candidatePath, "rev-parse", "--show-toplevel"],
+          128,
+          "fatal: unrelated repository parsing failure",
+        ),
+      ),
+    });
+
+    await expect(
+      service.findRepositoryRoot(pathToFileURL(nestedFile).toString()),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof GitServiceError &&
+        error.code === "git-command-failed" &&
+        error.operation === "findRepositoryRoot",
+    );
+  });
+
+  it("throws invalid-git-output when git discovery succeeds with blank stdout", async () => {
+    const directory = await createTempDirectory(
+      "git-repo-service-blank-root-output-",
+    );
+    tempDirectories.push(directory);
+
+    const nestedFile = join(directory, "repo", "conflict.txt");
+    await mkdir(dirname(nestedFile), { recursive: true });
+    await writeFile(nestedFile, "content", "utf8");
+
+    const service = new GitRepositoryService({
+      runGit: vi.fn().mockResolvedValue({
+        stderr: "",
+        stdout: "  \n\t  ",
+      }),
+    });
+
+    await expect(
+      service.findRepositoryRoot(pathToFileURL(nestedFile).toString()),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof GitServiceError &&
+        error.code === "invalid-git-output" &&
+        error.operation === "findRepositoryRoot",
+    );
+  });
+
   it("throws a typed error when git rejects an unsafe repository", async () => {
     const repositoryRoot = await createTempDirectory("git-repo-service-unsafe-");
     tempDirectories.push(repositoryRoot);
