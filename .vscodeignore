@@ -1,0 +1,6 @@
+src/**
+tsconfig.json
+vitest.config.ts
+.superpowers/**
+docs/**
+node_modules/**

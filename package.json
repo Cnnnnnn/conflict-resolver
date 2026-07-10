@@ -1,0 +1,76 @@
+{
+  "name": "conflict-resolver",
+  "displayName": "Conflict Resolver",
+  "description": "VS Code and Cursor extension for locating and navigating Git merge conflicts.",
+  "version": "0.0.1",
+  "publisher": "local-dev",
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:.git"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "conflictResolver.nextConflict",
+        "title": "Conflict Resolver: Next Conflict"
+      },
+      {
+        "command": "conflictResolver.previousConflict",
+        "title": "Conflict Resolver: Previous Conflict"
+      },
+      {
+        "command": "conflictResolver.openPanel",
+        "title": "Conflict Resolver: Open Conflict Panel"
+      },
+      {
+        "command": "conflictResolver.rescanCurrentFile",
+        "title": "Conflict Resolver: Rescan Current File"
+      },
+      {
+        "command": "conflictResolver.openMergeEditor",
+        "title": "Conflict Resolver: Open Merge Editor"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "conflictResolver",
+          "title": "Conflict Resolver",
+          "icon": "resources/conflict.svg"
+        }
+      ]
+    },
+    "views": {
+      "conflictResolver": [
+        {
+          "id": "conflictResolver.tree",
+          "name": "Conflicts"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "test:unit": "vitest run",
+    "check": "npm run compile && npm run test:unit"
+  },
+  "devDependencies": {
+    "@types/node": "18.17.19",
+    "@types/vscode": "1.100.0",
+    "typescript": "5.8.3",
+    "vite": "6.3.5",
+    "vitest": "3.2.4"
+  },
+  "overrides": {
+    "@vitest/pretty-format": "3.2.4"
+  }
+}
