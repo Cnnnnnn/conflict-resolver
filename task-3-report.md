@@ -1,31 +1,61 @@
 # Task 3 Report
 
-## Pre-edit Findings
+## Scope
 
-- `findRepositoryRoot()` called `resolveCandidatePath()` before entering its typed-error handling, so filesystem discovery failures could bypass `GitServiceError`.
-- `isNotRepositoryResult()` called `hasRepositoryMarkerInAncestors()` directly from the git-command error path, so an `EACCES` or `EPERM` while probing `.git` ancestors could leak a raw exception.
-- `findRepositoryRoot()` used `stdout.trim()`, which would strip valid leading or trailing spaces from a repository root path instead of only removing Git's trailing line terminator.
+Current Task 3 files:
+
+- `src/gitRepositoryService.ts`
+- `src/test/gitRepositoryService.test.ts`
+- `task-3-report.md`
+- `.superpowers/sdd/task-3-report.md`
+
+## Current State
+
+`GitRepositoryService` now:
+
+- resolves candidate paths inside typed repository-discovery error handling
+- returns `undefined` only for the canonical Git not-a-repository failure when no `.git` marker exists in accessible ancestors
+- preserves valid leading and trailing spaces in successful `rev-parse --show-toplevel` output while stripping only trailing line terminators
+- preserves literal backslashes in Git-reported unmerged filenames
+- maps Git execution and repository-marker probe failures to typed `GitServiceError` values
+- forces `LANG=C` and `LC_ALL=C` for Git `execFile` calls so non-repository classification is locale-stable
+
+## Review Fixes Applied
+
+- Candidate-path filesystem failures no longer escape raw; they map through typed discovery errors.
+- Ancestor `.git` marker probe failures during repository discovery are wrapped as typed discovery errors.
+- Blank or whitespace-only `rev-parse --show-toplevel` stdout now raises `invalid-git-output`.
+- Repository-root discovery preserves spaces in valid paths instead of trimming them away.
+- Unmerged-file parsing no longer rewrites literal backslashes out of Git-reported filenames.
+- The default Git runner now forces `LANG=C` and `LC_ALL=C`.
+- Added a regression that exercises the default runner path, asserts the forced locale env, and confirms the canonical C-locale not-a-repository stderr still resolves to `undefined`.
 
 ## Verification Evidence
 
-- Focused tests: `npm run test:unit -- src/test/gitRepositoryService.test.ts`
-  - Result: PASS (`12` tests passed)
-  - Notes: includes the new regression for permission-denied repository-marker discovery and the spaced-root stdout preservation case.
-- Full check: `npm run check`
-  - Result: PASS
-  - Notes: `tsc -p ./` succeeded, then Vitest passed all `21` tests across `src/test/conflictParser.test.ts` and `src/test/gitRepositoryService.test.ts`.
+Focused Task 3 suite:
 
-## Review Follow-up Fixes
+- Command: `CI=1 npm run test:unit -- src/test/gitRepositoryService.test.ts`
+- Result: PASS
 
-- `listUnmergedFiles()` no longer rewrites backslashes before POSIX normalization, so Git-reported repo-relative paths remain canonical and literal-backslash filenames such as `a\\b.txt` are preserved.
-- `findRepositoryRoot()` now accepts an injectable repository-marker ancestor probe, which keeps the production filesystem walk intact while making typed `EACCES` regression coverage deterministic without relying on `chmod 000`.
-- Real integration coverage remains in place through the existing outside-repository and temporary conflicted-repository tests; only the permission-denied regression moved to dependency injection.
+```text
+✓ src/test/gitRepositoryService.test.ts (14 tests) 393ms
+Test Files  1 passed (1)
+Tests  14 passed (14)
+Duration  767ms
+```
 
-## Follow-up Verification Evidence
+Full gate:
 
-- Focused tests: `npm run test:unit -- src/test/gitRepositoryService.test.ts`
-  - Result: PASS (`13` tests passed)
-  - Notes: includes the literal-backslash filename regression and the mocked ancestor-probe `EACCES` regression.
-- Full check: `npm run check`
-  - Result: PASS
-  - Notes: `tsc -p ./` succeeded, then Vitest passed all `22` tests across `src/test/conflictParser.test.ts` and `src/test/gitRepositoryService.test.ts`.
+- Command: `npm run check`
+- Result: PASS
+
+```text
+> conflict-resolver@0.0.1 compile
+> tsc -p ./
+
+✓ src/test/conflictParser.test.ts (9 tests) 3ms
+✓ src/test/gitRepositoryService.test.ts (14 tests) 458ms
+Test Files  2 passed (2)
+Tests  23 passed (23)
+Duration  814ms
+```

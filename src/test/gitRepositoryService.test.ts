@@ -67,6 +67,66 @@ describe("GitRepositoryService", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("forces a stable C locale for git discovery and classifies the canonical non-repo stderr as undefined", async () => {
+    const directory = await createTempDirectory("git-repo-service-stable-locale-");
+    tempDirectories.push(directory);
+
+    const nestedFile = join(directory, "space name", "子目录", "conflict.txt");
+    await mkdir(dirname(nestedFile), { recursive: true });
+    await writeFile(nestedFile, "content", "utf8");
+
+    const gitError = Object.assign(
+      new Error("fatal: not a git repository (or any of the parent directories): .git"),
+      {
+        code: 128,
+        stderr: "fatal: not a git repository (or any of the parent directories): .git\n",
+      },
+    );
+    const execFileMock = vi.fn(
+      (
+        _file: string,
+        _args: readonly string[],
+        _options: Record<string, unknown>,
+        callback: (error: Error | null, result?: { stdout: string; stderr: string }) => void,
+      ) => {
+        callback(gitError);
+      },
+    );
+
+    vi.resetModules();
+    vi.doMock("node:child_process", () => ({
+      execFile: execFileMock,
+    }));
+
+    try {
+      const { GitRepositoryService: StableLocaleGitRepositoryService } = await import(
+        "../gitRepositoryService"
+      );
+      const service = new StableLocaleGitRepositoryService();
+
+      await expect(
+        service.findRepositoryRoot(pathToFileURL(nestedFile).toString()),
+      ).resolves.toBeUndefined();
+
+      expect(execFileMock).toHaveBeenCalledTimes(1);
+      expect(execFileMock).toHaveBeenCalledWith(
+        "git",
+        ["-C", dirname(nestedFile), "rev-parse", "--show-toplevel"],
+        expect.objectContaining({
+          encoding: "utf8",
+          env: expect.objectContaining({
+            LANG: "C",
+            LC_ALL: "C",
+          }),
+        }),
+        expect.any(Function),
+      );
+    } finally {
+      vi.doUnmock("node:child_process");
+      vi.resetModules();
+    }
+  });
+
   it("treats unrelated exit-128 stderr without a .git ancestor as a typed GitServiceError", async () => {
     const directory = await createTempDirectory(
       "git-repo-service-unrelated-exit-128-",

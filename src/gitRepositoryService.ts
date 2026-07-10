@@ -100,6 +100,11 @@ function createGitCommandRunner(): GitCommandRunner {
     try {
       const result = await execFileAsync("git", [...args], {
         encoding: "utf8",
+        env: {
+          ...process.env,
+          LANG: "C",
+          LC_ALL: "C",
+        },
         maxBuffer: 10 * 1024 * 1024,
         windowsHide: true,
       });
