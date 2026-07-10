@@ -6,6 +6,7 @@ docs/**
 node_modules/**
 dist/test/**
 **/*.map
+resources/screenshots/**
 .token-savior-cache.json
 .gitignore
 *.vsix
