@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">Conflict Resolver logo</title>
+  <desc id="desc">Two conflicting branches merge into a resolved path.</desc>
+  <defs>
+    <linearGradient id="bg" x1="18" y1="14" x2="112" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#182235"/>
+      <stop offset="1" stop-color="#090D18"/>
+    </linearGradient>
+    <linearGradient id="red" x1="28" y1="28" x2="63" y2="65" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF7A5C"/>
+      <stop offset="1" stop-color="#E04444"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="100" y1="28" x2="65" y2="65" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6AA8FF"/>
+      <stop offset="1" stop-color="#4169E1"/>
+    </linearGradient>
+    <linearGradient id="green" x1="64" y1="66" x2="64" y2="104" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#5EF0C6"/>
+      <stop offset="1" stop-color="#20B486"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="150%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="8" stdDeviation="8" flood-color="#000000" flood-opacity="0.34"/>
+    </filter>
+    <filter id="nodeGlow" x="-60%" y="-60%" width="220%" height="220%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="0" stdDeviation="3" flood-color="#FFFFFF" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bg)" filter="url(#softShadow)"/>
+  <path d="M23 35h17" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.16"/>
+  <path d="M88 35h17" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.16"/>
+  <path d="M28 49h15" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.11"/>
+  <path d="M85 49h15" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" opacity="0.11"/>
+  <path d="M35 36L58.5 59.5" stroke="url(#red)" stroke-width="12" stroke-linecap="round"/>
+  <path d="M93 36L69.5 59.5" stroke="url(#blue)" stroke-width="12" stroke-linecap="round"/>
+  <path d="M64 70v26" stroke="url(#green)" stroke-width="12" stroke-linecap="round"/>
+  <circle cx="35" cy="36" r="9" fill="url(#red)" filter="url(#nodeGlow)"/>
+  <circle cx="93" cy="36" r="9" fill="url(#blue)" filter="url(#nodeGlow)"/>
+  <circle cx="64" cy="96" r="9" fill="url(#green)" filter="url(#nodeGlow)"/>
+  <path d="M64 47l17 17-17 17-17-17z" fill="#F4F8FF"/>
+  <path d="M56.5 64l5.6 5.7L73 57.8" fill="none" stroke="#111827" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M37 77l-9 7 9 7" fill="none" stroke="#FF7A5C" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.88"/>
+  <path d="M91 77l9 7-9 7" fill="none" stroke="#6AA8FF" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.88"/>
+</svg>

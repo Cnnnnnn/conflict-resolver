@@ -2,14 +2,38 @@
   "name": "conflict-resolver",
   "displayName": "Conflict Resolver",
   "description": "VS Code and Cursor extension for locating and navigating Git merge conflicts.",
+  "icon": "resources/icon.png",
   "version": "0.0.1",
-  "publisher": "local-dev",
-  "private": true,
+  "publisher": "shienLiang",
   "license": "MIT",
+  "author": {
+    "name": "shienLiang"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cnnnnnn/conflict-resolver.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Cnnnnnn/conflict-resolver/issues"
+  },
+  "homepage": "https://github.com/Cnnnnnn/conflict-resolver#readme",
+  "keywords": [
+    "git",
+    "merge",
+    "conflict",
+    "scm",
+    "gitlab",
+    "navigation"
+  ],
+  "galleryBanner": {
+    "color": "#1e1e1e",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.100.0"
   },
   "categories": [
+    "SCM Providers",
     "Other"
   ],
   "main": "./dist/extension.js",
@@ -21,11 +45,21 @@
     "commands": [
       {
         "command": "conflictResolver.nextConflict",
-        "title": "Conflict Resolver: Next Conflict"
+        "title": "Conflict Resolver: Next Conflict",
+        "icon": "$(chevron-right)"
       },
       {
         "command": "conflictResolver.previousConflict",
-        "title": "Conflict Resolver: Previous Conflict"
+        "title": "Conflict Resolver: Previous Conflict",
+        "icon": "$(chevron-left)"
+      },
+      {
+        "command": "conflictResolver.nextConflictInFile",
+        "title": "Conflict Resolver: Next Conflict in File"
+      },
+      {
+        "command": "conflictResolver.previousConflictInFile",
+        "title": "Conflict Resolver: Previous Conflict in File"
       },
       {
         "command": "conflictResolver.openPanel",
@@ -38,8 +72,229 @@
       {
         "command": "conflictResolver.openMergeEditor",
         "title": "Conflict Resolver: Open Merge Editor"
+      },
+      {
+        "command": "conflictResolver.refreshRemoteMR",
+        "title": "Conflict Resolver: Refresh Remote MR"
+      },
+      {
+        "command": "conflictResolver.openMergeRequest",
+        "title": "Conflict Resolver: Open Merge Request"
+      },
+      {
+        "command": "conflictResolver.fetchMrTargetBranch",
+        "title": "Conflict Resolver: Fetch MR Target Branch"
+      },
+      {
+        "command": "conflictResolver.previewMrMerge",
+        "title": "Conflict Resolver: Preview MR Merge"
+      },
+      {
+        "command": "conflictResolver.openMrConflicts",
+        "title": "Conflict Resolver: Open MR Conflicts Page"
+      },
+      {
+        "command": "conflictResolver.scmPickConflict",
+        "title": "选择冲突位置…",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated1",
+        "title": "冲突 1",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated2",
+        "title": "冲突 2",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated3",
+        "title": "冲突 3",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated4",
+        "title": "冲突 4",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated5",
+        "title": "冲突 5",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated6",
+        "title": "冲突 6",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated7",
+        "title": "冲突 7",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated8",
+        "title": "冲突 8",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated9",
+        "title": "冲突 9",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated10",
+        "title": "冲突 10",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated11",
+        "title": "冲突 11",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated12",
+        "title": "冲突 12",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated13",
+        "title": "冲突 13",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated14",
+        "title": "冲突 14",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated15",
+        "title": "冲突 15",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated16",
+        "title": "冲突 16",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated17",
+        "title": "冲突 17",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated18",
+        "title": "冲突 18",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated19",
+        "title": "冲突 19",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmGotoLocated20",
+        "title": "冲突 20",
+        "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.scmOpenMergeEditor",
+        "title": "打开 Merge Editor",
+        "category": "Conflict Resolver"
       }
     ],
+    "keybindings": [
+      {
+        "command": "conflictResolver.previousConflict",
+        "key": "alt+[",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.nextConflict",
+        "key": "alt+]",
+        "when": "conflictResolver.hasLocatedConflicts"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "conflictResolver.conflicts",
+        "label": "冲突"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "conflictResolver.previousConflict",
+          "when": "conflictResolver.hasLocatedConflicts",
+          "group": "navigation@1"
+        },
+        {
+          "command": "conflictResolver.nextConflict",
+          "when": "conflictResolver.hasLocatedConflicts",
+          "group": "navigation@2"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "conflictResolver.previousConflict",
+          "when": "view == conflictResolver.tree && conflictResolver.hasLocatedConflicts",
+          "group": "navigation@1"
+        },
+        {
+          "command": "conflictResolver.nextConflict",
+          "when": "view == conflictResolver.tree && conflictResolver.hasLocatedConflicts",
+          "group": "navigation@2"
+        }
+      ],
+      "scm/resourceState/context": [
+        {
+          "submenu": "conflictResolver.conflicts",
+          "when": "scmProvider == git && scmResourceGroup == merge && conflictResolver.hasMergeConflicts",
+          "group": "9_conflictResolver@1"
+        }
+      ],
+      "conflictResolver.conflicts": [
+        { "command": "conflictResolver.scmPickConflict", "when": "resourcePath != conflictResolver.scmEditorResourcePath", "group": "1_00" },
+        { "command": "conflictResolver.scmGotoLocated1", "when": "conflictResolver.scmEditorSlot1 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_01" },
+        { "command": "conflictResolver.scmGotoLocated2", "when": "conflictResolver.scmEditorSlot2 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_02" },
+        { "command": "conflictResolver.scmGotoLocated3", "when": "conflictResolver.scmEditorSlot3 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_03" },
+        { "command": "conflictResolver.scmGotoLocated4", "when": "conflictResolver.scmEditorSlot4 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_04" },
+        { "command": "conflictResolver.scmGotoLocated5", "when": "conflictResolver.scmEditorSlot5 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_05" },
+        { "command": "conflictResolver.scmGotoLocated6", "when": "conflictResolver.scmEditorSlot6 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_06" },
+        { "command": "conflictResolver.scmGotoLocated7", "when": "conflictResolver.scmEditorSlot7 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_07" },
+        { "command": "conflictResolver.scmGotoLocated8", "when": "conflictResolver.scmEditorSlot8 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_08" },
+        { "command": "conflictResolver.scmGotoLocated9", "when": "conflictResolver.scmEditorSlot9 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_09" },
+        { "command": "conflictResolver.scmGotoLocated10", "when": "conflictResolver.scmEditorSlot10 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_10" },
+        { "command": "conflictResolver.scmGotoLocated11", "when": "conflictResolver.scmEditorSlot11 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_11" },
+        { "command": "conflictResolver.scmGotoLocated12", "when": "conflictResolver.scmEditorSlot12 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_12" },
+        { "command": "conflictResolver.scmGotoLocated13", "when": "conflictResolver.scmEditorSlot13 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_13" },
+        { "command": "conflictResolver.scmGotoLocated14", "when": "conflictResolver.scmEditorSlot14 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_14" },
+        { "command": "conflictResolver.scmGotoLocated15", "when": "conflictResolver.scmEditorSlot15 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_15" },
+        { "command": "conflictResolver.scmGotoLocated16", "when": "conflictResolver.scmEditorSlot16 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_16" },
+        { "command": "conflictResolver.scmGotoLocated17", "when": "conflictResolver.scmEditorSlot17 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_17" },
+        { "command": "conflictResolver.scmGotoLocated18", "when": "conflictResolver.scmEditorSlot18 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_18" },
+        { "command": "conflictResolver.scmGotoLocated19", "when": "conflictResolver.scmEditorSlot19 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_19" },
+        { "command": "conflictResolver.scmGotoLocated20", "when": "conflictResolver.scmEditorSlot20 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_20" },
+        { "command": "conflictResolver.scmOpenMergeEditor", "when": "conflictResolver.scmEditorGitOnly && resourcePath == conflictResolver.scmEditorResourcePath", "group": "2_merge" },
+        { "command": "conflictResolver.scmOpenMergeEditor", "when": "conflictResolver.hasGitOnlyMergeFiles && resourcePath != conflictResolver.scmEditorResourcePath", "group": "2_merge" }
+      ]
+    },
+    "configuration": {
+      "title": "Conflict Resolver",
+      "properties": {
+        "conflictResolver.gitlabUrl": {
+          "type": "string",
+          "default": "https://gitlab.com",
+          "description": "GitLab instance URL"
+        },
+        "conflictResolver.gitlabToken": {
+          "type": "string",
+          "default": "",
+          "description": "GitLab API token; prefer environment variable GITLAB_TOKEN"
+        }
+      }
+    },
     "viewsContainers": {
       "activitybar": [
         {
@@ -61,7 +316,10 @@
   "scripts": {
     "compile": "tsc -p ./",
     "test:unit": "vitest run",
-    "check": "npm run compile && npm run test:unit"
+    "check": "npm run compile && npm run test:unit",
+    "package": "vsce package",
+    "publish:marketplace": "vsce publish",
+    "publish:openvsx": "ovsx publish"
   },
   "devDependencies": {
     "@types/node": "18.17.19",

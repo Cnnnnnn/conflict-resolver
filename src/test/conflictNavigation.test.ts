@@ -113,6 +113,81 @@ function createCallbacks(
 }
 
 describe("ConflictNavigation", () => {
+  it("navigates across files in workspace order", async () => {
+    const firstUri = pathToFileURL("/repo/a.ts").toString();
+    const secondUri = pathToFileURL("/repo/b.ts").toString();
+    const store = new FakeConflictNavigationStore(
+      createSnapshot([
+        {
+          relativePath: "a.ts",
+          uri: firstUri,
+          locatedConflicts: [createConflict("a-1", 4)],
+        },
+        {
+          relativePath: "b.ts",
+          uri: secondUri,
+          locatedConflicts: [createConflict("b-1", 8)],
+        },
+      ]),
+    );
+
+    let activeUri = firstUri;
+    let activeLine = 4;
+    const callbacks = createCallbacks(() => ({
+      uri: activeUri,
+      line: activeLine,
+    }));
+    const navigation = new ConflictNavigation(store, callbacks);
+
+    await expect(navigation.next()).resolves.toBe(true);
+    expect(callbacks.revealConflict).toHaveBeenCalledWith(
+      secondUri,
+      expect.objectContaining({ id: "b-1" }),
+    );
+
+    activeUri = secondUri;
+    activeLine = 8;
+    await expect(navigation.previous()).resolves.toBe(true);
+    expect(callbacks.revealConflict).toHaveBeenLastCalledWith(
+      firstUri,
+      expect.objectContaining({ id: "a-1" }),
+    );
+  });
+
+  it("keeps file-local navigation available", async () => {
+    const uri = pathToFileURL("/repo/src/example.ts").toString();
+    const store = new FakeConflictNavigationStore(
+      createSnapshot([
+        {
+          relativePath: "src/example.ts",
+          uri,
+          locatedConflicts: [
+            createConflict("late", 20),
+            createConflict("early", 4),
+          ],
+        },
+        {
+          relativePath: "src/other.ts",
+          uri: pathToFileURL("/repo/src/other.ts").toString(),
+          locatedConflicts: [createConflict("other", 1)],
+        },
+      ]),
+    );
+
+    let activeLine = 5;
+    const callbacks = createCallbacks(() => ({
+      uri,
+      line: activeLine,
+    }));
+    const navigation = new ConflictNavigation(store, callbacks);
+
+    await expect(navigation.nextInFile()).resolves.toBe(true);
+    expect(callbacks.revealConflict).toHaveBeenCalledWith(
+      uri,
+      expect.objectContaining({ id: "late", startLine: 20 }),
+    );
+  });
+
   it("navigates previous and next conflicts by sorted start line without wrapping", async () => {
     const uri = pathToFileURL("/repo/src/example.ts").toString();
     const store = new FakeConflictNavigationStore(

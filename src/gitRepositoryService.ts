@@ -29,7 +29,11 @@ type GitServiceErrorCode =
 type GitServiceOperation =
   | "findRepositoryRoot"
   | "listUnmergedFiles"
-  | "openMergeEditor";
+  | "openMergeEditor"
+  | "getCurrentBranch"
+  | "getDefaultRemote"
+  | "fetchRemoteBranch"
+  | "previewMergeWithRemoteBranch";
 
 type GitServiceErrorContext = {
   args?: readonly string[];
@@ -219,6 +223,11 @@ function mapRepositoryDiscoveryFailure(
 
 function stripTrailingLineTerminators(output: string): string {
   return output.replace(/[\r\n]+$/u, "");
+}
+
+function countMergeTreeConflicts(output: string): number {
+  const matches = output.match(/^CONFLICT /gmu);
+  return matches?.length ?? 0;
 }
 
 async function resolveCandidatePath(uri: string): Promise<string> {
@@ -430,6 +439,197 @@ export class GitRepositoryService {
         { uri },
         error,
       );
+    }
+  }
+
+  async getCurrentBranch(repositoryRoot: string): Promise<string | undefined> {
+    try {
+      const result = await this.runGit([
+        "-C",
+        repositoryRoot,
+        "rev-parse",
+        "--abbrev-ref",
+        "HEAD",
+      ]);
+      const branch = stripTrailingLineTerminators(result.stdout);
+      if (branch === "HEAD" || /^\s*$/u.test(branch)) {
+        return undefined;
+      }
+      return branch;
+    } catch (error) {
+      if (error instanceof GitServiceError) {
+        throw error;
+      }
+
+      if (isGitCommandError(error)) {
+        throw mapGitCommandError("getCurrentBranch", error);
+      }
+
+      throw new GitServiceError(
+        "git-command-failed",
+        "getCurrentBranch",
+        "Failed to read the current branch",
+        { args: ["-C", repositoryRoot, "rev-parse", "--abbrev-ref", "HEAD"] },
+        error,
+      );
+    }
+  }
+
+  async getDefaultRemote(repositoryRoot: string): Promise<string> {
+    const branch = await this.getCurrentBranch(repositoryRoot);
+    if (branch !== undefined) {
+      try {
+        const result = await this.runGit([
+          "-C",
+          repositoryRoot,
+          "config",
+          "--get",
+          `branch.${branch}.remote`,
+        ]);
+        const remote = stripTrailingLineTerminators(result.stdout);
+        if (remote.length > 0) {
+          return remote;
+        }
+      } catch (error) {
+        if (
+          !(error instanceof GitCommandError) ||
+          error.exitCode !== 1
+        ) {
+          if (error instanceof GitServiceError) {
+            throw error;
+          }
+
+          if (isGitCommandError(error)) {
+            throw mapGitCommandError("getDefaultRemote", error);
+          }
+
+          throw error;
+        }
+      }
+    }
+
+    return "origin";
+  }
+
+  async fetchRemoteBranch(
+    repositoryRoot: string,
+    remote: string,
+    branch: string,
+  ): Promise<void> {
+    try {
+      await this.runGit([
+        "-C",
+        repositoryRoot,
+        "fetch",
+        remote,
+        branch,
+      ]);
+    } catch (error) {
+      if (error instanceof GitServiceError) {
+        throw error;
+      }
+
+      if (isGitCommandError(error)) {
+        throw mapGitCommandError("fetchRemoteBranch", error);
+      }
+
+      throw new GitServiceError(
+        "git-command-failed",
+        "fetchRemoteBranch",
+        "Failed to fetch the remote branch",
+        {
+          args: ["-C", repositoryRoot, "fetch", remote, branch],
+        },
+        error,
+      );
+    }
+  }
+
+  async previewMergeWithRemoteBranch(
+    repositoryRoot: string,
+    remote: string,
+    targetBranch: string,
+  ): Promise<
+    | {
+        ok: true;
+        conflictCount: number;
+        output: string;
+        targetRef: string;
+      }
+    | { ok: false; message: string }
+  > {
+    const targetRef = `${remote}/${targetBranch}`;
+
+    try {
+      await this.runGit([
+        "-C",
+        repositoryRoot,
+        "rev-parse",
+        "--verify",
+        targetRef,
+      ]);
+    } catch (error) {
+      if (isGitCommandError(error)) {
+        return {
+          ok: false,
+          message: `找不到远程引用 ${targetRef}，请先获取目标分支`,
+        };
+      }
+
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }
+
+    try {
+      const baseResult = await this.runGit([
+        "-C",
+        repositoryRoot,
+        "merge-base",
+        "HEAD",
+        targetRef,
+      ]);
+      const base = stripTrailingLineTerminators(baseResult.stdout);
+      const headResult = await this.runGit([
+        "-C",
+        repositoryRoot,
+        "rev-parse",
+        "HEAD",
+      ]);
+      const head = stripTrailingLineTerminators(headResult.stdout);
+      const treeResult = await this.runGit([
+        "-C",
+        repositoryRoot,
+        "merge-tree",
+        base,
+        head,
+        targetRef,
+      ]);
+
+      const conflictCount = countMergeTreeConflicts(treeResult.stdout);
+      return {
+        ok: true,
+        conflictCount,
+        output: treeResult.stdout,
+        targetRef,
+      };
+    } catch (error) {
+      if (error instanceof GitServiceError) {
+        return { ok: false, message: error.message };
+      }
+
+      if (isGitCommandError(error)) {
+        return {
+          ok: false,
+          message: error.stderr.trim() || error.message,
+        };
+      }
+
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 }

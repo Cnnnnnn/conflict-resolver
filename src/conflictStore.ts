@@ -3,6 +3,7 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parseConflictMarkers } from "./conflictParser";
+import { hasLocatedConflictMarkers, toConflictFileKey } from "./conflictScmMenu";
 import { GitRepositoryService } from "./gitRepositoryService";
 import type { ConflictBlock, ConflictFile, ConflictSnapshot, GitUnmergedFile } from "./types";
 
@@ -17,6 +18,7 @@ export type ConflictStoreDocumentLoader = {
   getOpenDocuments(): MaybePromise<readonly ConflictStoreDocument[]>;
   loadDocument(uri: string): MaybePromise<ConflictStoreDocument | undefined>;
   getRepositoryRoots(): MaybePromise<readonly string[]>;
+  readDiskText?(uri: string): MaybePromise<string | undefined>;
 };
 
 export type ConflictStoreGitService = Pick<
@@ -68,21 +70,73 @@ const defaultDocumentLoader: ConflictStoreDocumentLoader = {
     const text = await readFile(fileURLToPath(uri), "utf8");
     return createFileBackedDocument(uri, text);
   },
+  async readDiskText(uri) {
+    try {
+      return await readFile(fileURLToPath(uri), "utf8");
+    } catch {
+      return undefined;
+    }
+  },
   async getRepositoryRoots() {
     return [];
   },
 };
 
-function canonicalizeUri(uri: string): string {
-  try {
-    if (new URL(uri).protocol !== "file:") {
-      return uri;
-    }
+function hasLocatedConflictCandidate(text: string): boolean {
+  return hasLocatedConflictMarkers(text);
+}
 
-    return pathToFileURL(fileURLToPath(uri)).toString();
-  } catch {
-    return uri;
+function parseLocatedConflicts(
+  text: string,
+  parseConflicts: typeof parseConflictMarkers,
+): Pick<ConflictFile, "locatedConflicts" | "parseError"> {
+  if (!hasLocatedConflictCandidate(text)) {
+    return { locatedConflicts: [], parseError: undefined };
   }
+
+  const parsed = parseConflicts(text);
+  if (parsed.blocks.length === 0 && parsed.error === undefined) {
+    return { locatedConflicts: [], parseError: undefined };
+  }
+
+  return {
+    locatedConflicts: parsed.blocks,
+    parseError: parsed.error,
+  };
+}
+
+function finalizeSnapshot(
+  files: readonly ConflictFile[],
+  now: () => number,
+): ConflictSnapshot {
+  const snapshotFiles = [...files].sort(compareFiles);
+
+  return {
+    files: snapshotFiles,
+    generatedAt: now(),
+    gitOnlyCount: snapshotFiles.filter(
+      (file) =>
+        file.gitUnmerged &&
+        file.locatedConflicts.length === 0 &&
+        file.parseError !== undefined,
+    ).length,
+    locatedCount: snapshotFiles.reduce(
+      (count, file) => count + file.locatedConflicts.length,
+      0,
+    ),
+  };
+}
+
+function shouldOmitResolvedGitFile(
+  gitUnmerged: boolean,
+  locatedConflicts: readonly ConflictBlock[],
+  parseError: string | undefined,
+): boolean {
+  return (
+    gitUnmerged &&
+    locatedConflicts.length === 0 &&
+    parseError === undefined
+  );
 }
 
 function toFileSystemPath(uri: string): string | undefined {
@@ -145,14 +199,6 @@ function compareFiles(left: ConflictFile, right: ConflictFile): number {
   return 0;
 }
 
-function hasLocatedConflictCandidate(text: string): boolean {
-  return (
-    text.includes("<<<<<<<") ||
-    text.includes("=======") ||
-    text.includes(">>>>>>>")
-  );
-}
-
 function findContainingRepositoryRoot(
   repositoryRoots: readonly string[],
   uri: string,
@@ -195,6 +241,7 @@ export class ConflictStore {
   private pendingRefresh = false;
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private snapshot: ConflictSnapshot = EMPTY_SNAPSHOT;
+  private readonly recentlyOmittedFiles = new Map<string, ConflictFile>();
 
   constructor(options: ConflictStoreOptions = {}) {
     this.clearTimer = options.clearTimeout ?? clearTimeout;
@@ -220,15 +267,114 @@ export class ConflictStore {
     };
   }
 
-  scheduleRefresh(_reason: string): void {
-    if (this.refreshTimer !== undefined) {
-      return;
-    }
+  scheduleRefresh(_reason: string, options?: { debounceMs?: number }): void {
+    this.clearScheduledRefresh();
 
+    const debounceMs = options?.debounceMs ?? this.debounceMs;
     this.refreshTimer = this.scheduleTimer(() => {
       this.refreshTimer = undefined;
       void this.refresh();
-    }, this.debounceMs);
+    }, debounceMs);
+  }
+
+  scheduleImmediateRefresh(_reason: string): void {
+    this.clearScheduledRefresh();
+    void this.refresh();
+  }
+
+  applyOpenDocumentText(uri: string, text: string): boolean {
+    const key = toConflictFileKey(uri);
+    const fileIndex = this.snapshot.files.findIndex(
+      (file) => toConflictFileKey(file.uri) === key,
+    );
+    const existing = fileIndex >= 0 ? this.snapshot.files[fileIndex] : undefined;
+    const hasMarkers = hasLocatedConflictCandidate(text);
+
+    if (existing === undefined && !hasMarkers) {
+      return false;
+    }
+
+    const { locatedConflicts, parseError } = parseLocatedConflicts(
+      text,
+      this.parseConflicts,
+    );
+
+    if (existing === undefined) {
+      const cached = this.recentlyOmittedFiles.get(key);
+      if (cached !== undefined && hasMarkers) {
+        const restoredFile: ConflictFile = {
+          ...cached,
+          uri,
+          locatedConflicts,
+          parseError,
+        };
+
+        if (
+          !shouldOmitResolvedGitFile(
+            restoredFile.gitUnmerged,
+            restoredFile.locatedConflicts,
+            restoredFile.parseError,
+          )
+        ) {
+          this.recentlyOmittedFiles.delete(key);
+          this.publishSnapshot([...this.snapshot.files, restoredFile]);
+          return true;
+        }
+      }
+
+      if (hasMarkers) {
+        this.scheduleImmediateRefresh("restored-markers");
+        return true;
+      }
+
+      return false;
+    }
+
+    const updatedFile: ConflictFile = {
+      ...existing,
+      uri,
+      locatedConflicts,
+      parseError,
+    };
+
+    let nextFiles = [...this.snapshot.files];
+    if (shouldOmitResolvedGitFile(
+      updatedFile.gitUnmerged,
+      updatedFile.locatedConflicts,
+      updatedFile.parseError,
+    )) {
+      this.recentlyOmittedFiles.set(key, updatedFile);
+      nextFiles = nextFiles.filter((file) => toConflictFileKey(file.uri) !== key);
+    } else {
+      this.recentlyOmittedFiles.delete(key);
+      nextFiles[fileIndex] = updatedFile;
+    }
+
+    const previousCount = this.snapshot.locatedCount;
+    const previousFiles = this.snapshot.files.length;
+    const previousLocated = existing.locatedConflicts.length;
+    this.publishSnapshot(nextFiles);
+
+    return (
+      this.snapshot.locatedCount !== previousCount ||
+      this.snapshot.files.length !== previousFiles ||
+      previousLocated !== locatedConflicts.length
+    );
+  }
+
+  private publishSnapshot(files: readonly ConflictFile[]): void {
+    this.snapshot = finalizeSnapshot(files, this.now);
+    void this.emitDidChange(this.snapshot);
+  }
+
+  private syncRecentlyOmittedFiles(): void {
+    for (const key of [...this.recentlyOmittedFiles.keys()]) {
+      if (
+        this.snapshot.files.some((file) => toConflictFileKey(file.uri) === key)
+      ) {
+        this.recentlyOmittedFiles.delete(key);
+      }
+    }
   }
 
   async refresh(): Promise<ConflictSnapshot> {
@@ -260,6 +406,7 @@ export class ConflictStore {
       this.pendingRefresh = false;
       const nextSnapshot = await this.buildSnapshot();
       this.snapshot = nextSnapshot;
+      this.syncRecentlyOmittedFiles();
       await this.emitDidChange(nextSnapshot);
     } while (this.pendingRefresh);
 
@@ -311,11 +458,16 @@ export class ConflictStore {
       return discovery;
     };
 
+    const openDocumentsByKey = new Map<string, ConflictStoreDocument>();
+    for (const document of openDocuments) {
+      openDocumentsByKey.set(toConflictFileKey(document.uri), document);
+    }
+
     const openDocumentState = [];
     for (const document of openDocuments) {
       openDocumentState.push({
         document,
-        key: canonicalizeUri(document.uri),
+        key: toConflictFileKey(document.uri),
         repositoryRoot: await resolveRepositoryRoot(document.uri),
       });
     }
@@ -338,7 +490,7 @@ export class ConflictStore {
       );
 
       for (const file of unmergedFiles) {
-        await this.mergeGitUnmergedFile(files, file);
+        await this.mergeGitUnmergedFile(files, file, openDocumentsByKey);
       }
     }
 
@@ -348,42 +500,50 @@ export class ConflictStore {
 
     const snapshotFiles = [...files.values()]
       .map((entry) => entry.file)
-      .sort(compareFiles);
+      .filter(
+        (file) =>
+          !shouldOmitResolvedGitFile(
+            file.gitUnmerged,
+            file.locatedConflicts,
+            file.parseError,
+          ),
+      );
 
-    return {
-      files: snapshotFiles,
-      generatedAt: this.now(),
-      gitOnlyCount: snapshotFiles.filter(
-        (file) => file.gitUnmerged && file.locatedConflicts.length === 0,
-      ).length,
-      locatedCount: snapshotFiles.reduce(
-        (count, file) => count + file.locatedConflicts.length,
-        0,
-      ),
-    };
+    return finalizeSnapshot(snapshotFiles, this.now);
   }
 
   private async mergeGitUnmergedFile(
     files: Map<string, ConflictRecord>,
     gitFile: GitUnmergedFile,
+    openDocumentsByKey: ReadonlyMap<string, ConflictStoreDocument>,
   ): Promise<void> {
-    const key = canonicalizeUri(gitFile.uri);
+    const key = toConflictFileKey(gitFile.uri);
     const existing = files.get(key);
+    const openDocument = openDocumentsByKey.get(key);
     let locatedConflicts: ConflictBlock[] = [];
     let parseError: string | undefined;
 
     try {
-      const text = await this.loadDocumentText(gitFile.uri);
-      const parsed = this.parseConflicts(text);
-      locatedConflicts = parsed.blocks;
-      parseError = parsed.error;
+      const text =
+        openDocument !== undefined
+          ? await openDocument.getText()
+          : await this.readDiskText(gitFile.uri);
+      const parsed = parseLocatedConflicts(text, this.parseConflicts);
+      locatedConflicts = parsed.locatedConflicts;
+      parseError = parsed.parseError;
     } catch (error) {
       parseError = formatLoadError(error);
     }
 
+    if (
+      shouldOmitResolvedGitFile(true, locatedConflicts, parseError)
+    ) {
+      return;
+    }
+
     files.set(key, {
       file: {
-        uri: existing?.file.uri ?? gitFile.uri,
+        uri: openDocument?.uri ?? existing?.file.uri ?? gitFile.uri,
         repositoryRoot: gitFile.repositoryRoot,
         relativePath: gitFile.relativePath,
         locatedConflicts,
@@ -413,40 +573,27 @@ export class ConflictStore {
       return;
     }
 
-    if (!hasLocatedConflictCandidate(text)) {
-      if (existing === undefined) {
+    const { locatedConflicts, parseError } = parseLocatedConflicts(
+      text,
+      this.parseConflicts,
+    );
+
+    if (existing === undefined) {
+      if (locatedConflicts.length === 0) {
         return;
       }
-
-      files.set(key, {
-        file: {
-          uri: document.uri,
-          repositoryRoot: resolvedRepositoryRoot,
-          relativePath,
-          locatedConflicts: [],
-          gitUnmerged: existing.file.gitUnmerged,
-          parseError: undefined,
-        },
-      });
+    } else if (
+      shouldOmitResolvedGitFile(
+        existing.file.gitUnmerged,
+        locatedConflicts,
+        parseError,
+      )
+    ) {
+      files.delete(key);
       return;
     }
 
-    const parsed = this.parseConflicts(text);
-    if (parsed.blocks.length === 0 && parsed.error === undefined) {
-      if (existing === undefined) {
-        return;
-      }
-
-      files.set(key, {
-        file: {
-          uri: document.uri,
-          repositoryRoot: resolvedRepositoryRoot,
-          relativePath,
-          locatedConflicts: [],
-          gitUnmerged: existing.file.gitUnmerged,
-          parseError: undefined,
-        },
-      });
+    if (locatedConflicts.length === 0 && existing === undefined) {
       return;
     }
 
@@ -455,11 +602,22 @@ export class ConflictStore {
         uri: document.uri,
         repositoryRoot: resolvedRepositoryRoot,
         relativePath,
-        locatedConflicts: parsed.blocks,
+        locatedConflicts,
         gitUnmerged: existing?.file.gitUnmerged ?? false,
-        parseError: parsed.error,
+        parseError,
       },
     });
+  }
+
+  private async readDiskText(uri: string): Promise<string> {
+    if (this.documents.readDiskText !== undefined) {
+      const text = await this.documents.readDiskText(uri);
+      if (text !== undefined) {
+        return text;
+      }
+    }
+
+    return readFile(fileURLToPath(uri), "utf8");
   }
 
   private async loadDocumentText(uri: string): Promise<string> {

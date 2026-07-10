@@ -1,12 +1,10 @@
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  viewBox="0 0 128 128"
-  role="img"
-  aria-labelledby="title"
->
-  <title>Conflict Resolver</title>
-  <path
-    d="M44 20a12 12 0 1 1 0 24 12 12 0 0 1 0-24Zm40 64a12 12 0 1 1 0 24 12 12 0 0 1 0-24Zm0-64a12 12 0 1 1 0 24 12 12 0 0 1 0-24ZM50 34h28v12H50zm28 48H50V70h28zm-40-2h12V48H38zm40-16h12v32H78z"
-    fill="#c84b31"
-  />
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" role="img" aria-labelledby="title desc">
+  <title id="title">Conflict Resolver</title>
+  <desc id="desc">Two conflict branches merge into one resolved path.</desc>
+  <path d="M6 5.25l4.5 4.5M18 5.25l-4.5 4.5M12 14.25v4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="6" cy="5.25" r="2.15" fill="currentColor"/>
+  <circle cx="18" cy="5.25" r="2.15" fill="currentColor"/>
+  <circle cx="12" cy="18.75" r="2.15" fill="currentColor"/>
+  <path d="M12 8.8l3.2 3.2-3.2 3.2L8.8 12z" fill="currentColor"/>
+  <path d="M10.55 12.15l1.1 1.1 2.05-2.35" fill="none" stroke="#000" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>
 </svg>

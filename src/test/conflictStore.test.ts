@@ -117,6 +117,15 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
   async getRepositoryRoots(): Promise<string[]> {
     return [...this.repositoryRoots];
   }
+
+  async readDiskText(uri: string): Promise<string | undefined> {
+    const error = this.loadErrors.get(uri);
+    if (error !== undefined) {
+      throw error;
+    }
+
+    return this.documents.get(uri)?.loadedText;
+  }
 }
 
 class FakeGitRepositoryService {
@@ -201,13 +210,11 @@ describe("ConflictStore", () => {
     const snapshot = await store.refresh();
 
     expect(snapshot.locatedCount).toBe(2);
-    expect(snapshot.gitOnlyCount).toBe(1);
+    expect(snapshot.gitOnlyCount).toBe(0);
     expect(snapshot.files.map((file) => file.relativePath)).toEqual([
-      "config.json",
       "src/a.ts",
       "src/z.ts",
     ]);
-    expect(snapshot.files.find((file) => file.relativePath === "config.json")?.locatedConflicts).toHaveLength(0);
     expect(snapshot.files.find((file) => file.relativePath === "src/a.ts")).toMatchObject({
       gitUnmerged: false,
     });
@@ -254,15 +261,8 @@ describe("ConflictStore", () => {
     const snapshot = await store.refresh();
 
     expect(snapshot.locatedCount).toBe(0);
-    expect(snapshot.gitOnlyCount).toBe(1);
-    expect(snapshot.files).toEqual([
-      expect.objectContaining({
-        relativePath: "src/a.ts",
-        gitUnmerged: true,
-        locatedConflicts: [],
-        parseError: undefined,
-      }),
-    ]);
+    expect(snapshot.gitOnlyCount).toBe(0);
+    expect(snapshot.files).toEqual([]);
   });
 
   it("merges git and open-document scans by canonical file URI", async () => {
@@ -468,7 +468,7 @@ describe("ConflictStore", () => {
     ]);
   });
 
-  it("debounces scheduled refreshes through a single timer", async () => {
+  it("debounces scheduled refreshes with trailing debounce", async () => {
     const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
     fakeDocuments.setDocument("src/a.ts", markerText("a"));
 
@@ -496,5 +496,87 @@ describe("ConflictStore", () => {
     expect(listener).toHaveBeenCalledTimes(1);
 
     disposable.dispose();
+  });
+
+  it("updates located conflict count when the open buffer resolves one marker block", async () => {
+    const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
+    fakeDocuments.setDocument(
+      "src/a.ts",
+      `${markerText("first")}\n\n${markerText("second")}`,
+      { open: true },
+    );
+
+    const fakeGit = new FakeGitRepositoryService();
+    fakeGit.setUnmerged(["src/a.ts"]);
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    expect((await store.refresh()).locatedCount).toBe(2);
+
+    fakeDocuments.setDocument("src/a.ts", markerText("first"), { open: true });
+    expect((await store.refresh()).locatedCount).toBe(1);
+  });
+
+  it("updates conflict counts immediately from the open buffer", async () => {
+    const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
+    fakeDocuments.setDocument(
+      "src/a.ts",
+      `${markerText("first")}\n\n${markerText("second")}`,
+      { open: true },
+    );
+
+    const fakeGit = new FakeGitRepositoryService();
+    fakeGit.setUnmerged(["src/a.ts"]);
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    await store.refresh();
+    const uri = toUri(`${REPOSITORY_ROOT}/src/a.ts`);
+
+    expect(
+      store.applyOpenDocumentText(uri, markerText("first")),
+    ).toBe(true);
+    expect(store.getSnapshot().locatedCount).toBe(1);
+
+    expect(store.applyOpenDocumentText(uri, "resolved")).toBe(true);
+    expect(store.getSnapshot().locatedCount).toBe(0);
+    expect(store.getSnapshot().files).toEqual([]);
+
+    expect(
+      store.applyOpenDocumentText(
+        uri,
+        `${markerText("first")}\n\n${markerText("second")}`,
+      ),
+    ).toBe(true);
+    expect(store.getSnapshot().locatedCount).toBe(2);
+    expect(store.getSnapshot().files).toHaveLength(1);
+  });
+
+  it("prefers the open buffer over on-disk markers for git-unmerged files", async () => {
+    const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
+    fakeDocuments.setDocument("package.json", markerText("disk"), {
+      open: true,
+      openText: "resolved in editor",
+    });
+
+    const fakeGit = new FakeGitRepositoryService();
+    fakeGit.setUnmerged(["package.json"]);
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    const snapshot = await store.refresh();
+
+    expect(snapshot.gitOnlyCount).toBe(0);
+    expect(snapshot.locatedCount).toBe(0);
+    expect(snapshot.files).toEqual([]);
   });
 });

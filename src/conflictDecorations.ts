@@ -1,3 +1,4 @@
+import { toConflictFileKey } from "./conflictScmMenu";
 import type { ConflictSnapshot } from "./types";
 
 export type ConflictDecorationRange = { startLine: number; endLine: number };
@@ -18,20 +19,23 @@ export class ConflictDecorationManager {
   constructor(private readonly adapter: ConflictDecorationAdapter) {}
 
   update(snapshot: ConflictSnapshot): void {
-    const byUri = new Map(snapshot.files.map((file) => [file.uri, file]));
+    const byUri = new Map(
+      snapshot.files.map((file) => [toConflictFileKey(file.uri), file]),
+    );
     const editors = this.adapter.getEditors();
     for (const editor of editors) {
-      const ranges = (byUri.get(editor.uri)?.locatedConflicts ?? []).map((conflict) => ({
+      const file = byUri.get(toConflictFileKey(editor.uri));
+      const ranges = (file?.locatedConflicts ?? []).map((conflict) => ({
         startLine: conflict.startLine,
         endLine: conflict.startLine,
       }));
       editor.setStartLineDecorations(ranges);
       editor.setOverviewDecorations(ranges);
-      this.previousEditors.set(editor.uri, editor);
+      this.previousEditors.set(toConflictFileKey(editor.uri), editor);
     }
 
     for (const [uri, editor] of this.previousEditors) {
-      if (!editors.some((current) => current.uri === uri)) {
+      if (!editors.some((current) => toConflictFileKey(current.uri) === uri)) {
         editor.setStartLineDecorations([]);
         editor.setOverviewDecorations([]);
         this.previousEditors.delete(uri);
