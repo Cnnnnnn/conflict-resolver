@@ -3,7 +3,7 @@
   "displayName": "Conflict Resolver",
   "description": "VS Code and Cursor extension for locating and navigating Git merge conflicts.",
   "icon": "resources/icon.png",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "publisher": "shienLiang",
   "license": "MIT",
   "author": {
@@ -248,6 +248,16 @@
       {
         "command": "conflictResolver.treeSearch",
         "title": "Conflict Resolver: Search Conflicts"
+      },
+      {
+        "command": "conflictResolver.undoLastAccept",
+        "title": "Conflict Resolver: Undo Last Accept",
+        "icon": "$(discard)"
+      },
+      {
+        "command": "conflictResolver.back",
+        "title": "Conflict Resolver: Back to Previous Conflict",
+        "icon": "$(arrow-left)"
       }
     ],
     "keybindings": [
@@ -265,6 +275,16 @@
         "command": "conflictResolver.treeSearch",
         "key": "ctrl+shift+f",
         "when": "view == conflictResolver.tree"
+      },
+      {
+        "command": "conflictResolver.back",
+        "key": "alt+left",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.undoLastAccept",
+        "key": "ctrl+shift+u",
+        "when": "conflictResolver.hasUndo"
       }
     ],
     "submenus": [
@@ -316,6 +336,16 @@
           "command": "conflictResolver.batchAcceptIncoming",
           "when": "view == conflictResolver.tree && conflictResolver.hasSelection",
           "group": "navigation@6"
+        },
+        {
+          "command": "conflictResolver.back",
+          "when": "view == conflictResolver.tree && conflictResolver.hasUndo",
+          "group": "navigation@7"
+        },
+        {
+          "command": "conflictResolver.undoLastAccept",
+          "when": "view == conflictResolver.tree && conflictResolver.hasUndo",
+          "group": "navigation@8"
         }
       ],
       "view/item/context": [

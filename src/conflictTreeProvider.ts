@@ -11,7 +11,7 @@ import type {
   ConflictStoreChangeListener,
   ConflictStoreDisposable,
 } from "./conflictStore";
-import { formatConflictPreviewTooltip } from "./conflictPreview";
+import { formatConflictPreviewTooltip, extractConflictPreview } from "./conflictPreview";
 import type { MergeRequestConflictService } from "./mergeRequestConflictService";
 import {
   formatGitOnlyConflictLabel,
@@ -381,7 +381,7 @@ function createConflictItem(
     conflictIndex,
     startLine: conflict.startLine,
     endLine: conflict.endLine,
-    description: `第 ${conflict.startLine + 1} 行`,
+    description: buildConflictDescription(conflict, fileText),
     tooltip: formatConflictPreviewTooltip(file.relativePath, conflict, fileText),
     command: {
       command: CONFLICT_TREE_GO_TO_COMMAND,
@@ -396,6 +396,27 @@ function createConflictItem(
     checked,
   };
   return item;
+}
+
+function buildConflictDescription(
+  conflict: ConflictBlock,
+  fileText: string | undefined,
+): string {
+  const header = `第 ${conflict.startLine + 1} 行`;
+  if (fileText === undefined) {
+    return header;
+  }
+  const preview = extractConflictPreview(fileText, conflict);
+  const ours = preview.ours.find((line) => line.trim().length > 0) ?? "(空)";
+  const theirs = preview.theirs.find((line) => line.trim().length > 0) ?? "(空)";
+  return `${header}    ← ${truncate(ours, 32)}  ·  → ${truncate(theirs, 32)}`;
+}
+
+function truncate(line: string, max: number): string {
+  if (line.length <= max) {
+    return line;
+  }
+  return `${line.slice(0, max - 1)}…`;
 }
 
 function formatMrLabel(mr: MergeRequestConflict): string {

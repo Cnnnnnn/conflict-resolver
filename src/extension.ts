@@ -35,6 +35,7 @@ import {
   formatBatchResolutionMessage,
   type ConflictResolutionSide,
 } from "./conflictResolution";
+import { applyConflictUndo, createConflictUndoStore, type ConflictUndoEntry } from "./conflictUndo";
 import {
   buildScmEditorSlotContext,
   canonicalizeConflictUri,
@@ -359,6 +360,63 @@ async function updateFilterMode(mode: ConflictFilterMode): Promise<void> {
   await config.update("treeFilterMode", mode, vscode.ConfigurationTarget.Workspace);
 }
 
+async function acceptConflictAndAdvance(
+  side: ConflictResolutionSide,
+  args: { uri: string; conflictId: string },
+  store: ConflictStore,
+  navigation: ConflictNavigation,
+  undoStore: ReturnType<typeof createConflictUndoStore>,
+  syncUndoContext: () => void,
+): Promise<void> {
+  const undoEntries = await snapshotForUndo([{ uri: args.uri, conflictId: args.conflictId }]);
+  const ok = await applyConflictResolution(
+    store.getSnapshot(),
+    {
+      revealConflict: revealConflictInEditor,
+      runCommand: async (command) => {
+        await vscode.commands.executeCommand(command);
+      },
+    },
+    args.uri,
+    args.conflictId,
+    side,
+  );
+  if (!ok) {
+    await vscode.window.showWarningMessage("未找到可处理的冲突");
+    return;
+  }
+  undoStore.record(undoEntries);
+  syncUndoContext();
+  await store.waitForChange();
+  await navigation.goToAfter(args.uri, 0);
+}
+
+async function snapshotForUndo(
+  targets: readonly { uri: string; conflictId: string }[],
+): Promise<ConflictUndoEntry[]> {
+  const byPath = new Map<string, { uri: string; label: string }>();
+  for (const target of targets) {
+    const label = target.uri.split("/").pop() ?? target.uri;
+    byPath.set(target.uri, { uri: target.uri, label });
+  }
+
+  const entries: ConflictUndoEntry[] = [];
+  for (const { uri, label } of byPath.values()) {
+    try {
+      const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+      entries.push({
+        uri,
+        fsPath: document.uri.fsPath,
+        contents: document.getText(),
+        label,
+      });
+    } catch {
+      // skip: file might be removed; undo can ignore it
+    }
+  }
+  return entries;
+}
+
 async function runTreeSearch(
   store: ConflictStore,
   navigation: ConflictNavigation,
@@ -422,6 +480,9 @@ async function runBatchResolution(
   side: ConflictResolutionSide,
   store: ConflictStore,
   tree: ConflictTreeProvider,
+  undoStore: ReturnType<typeof createConflictUndoStore>,
+  navigation: ConflictNavigation,
+  syncUndoContext: () => void,
 ): Promise<void> {
   const snapshot = store.getSnapshot();
   const selection = tree.getSelection();
@@ -458,6 +519,8 @@ async function runBatchResolution(
     }
   }
 
+  const undoEntries = await snapshotForUndo(targets);
+
   const summary = await applyBatchConflictResolution(
     snapshot,
     {
@@ -470,8 +533,21 @@ async function runBatchResolution(
     side,
   );
 
+  if (summary.resolved > 0) {
+    undoStore.record(undoEntries);
+    syncUndoContext();
+  }
+
   if (selection.size > 0) {
     tree.clearSelection();
+  }
+
+  if (summary.resolved > 0) {
+    const anchor = targets[targets.length - 1];
+    if (anchor !== undefined) {
+      await store.waitForChange();
+      await navigation.goToAfter(anchor.uri, Number.MAX_SAFE_INTEGER);
+    }
   }
 
   await vscode.window.showInformationMessage(formatBatchResolutionMessage(side, summary));
@@ -537,6 +613,14 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.window.showWarningMessage(`无法打开 Merge Editor：${uri}。${error instanceof Error ? error.message : String(error)}`);
     },
   });
+  const undoStore = createConflictUndoStore();
+  const syncUndoContext = (): void => {
+    void vscode.commands.executeCommand(
+      "setContext",
+      "conflictResolver.hasUndo",
+      undoStore.size() > 0,
+    );
+  };
   const statusBar = new ConflictStatusBar({
     store,
     statusBar: {
@@ -676,44 +760,32 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand(CONFLICT_TREE_GO_TO_COMMAND, (args: ConflictTreeCommandArguments) => navigation.goTo(args.uri, args.conflictId)),
     vscode.commands.registerCommand(
       CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
-      async (args: ConflictTreeCommandArguments) => {
-        const ok = await applyConflictResolution(
-          store.getSnapshot(),
-          {
-            revealConflict: revealConflictInEditor,
-            runCommand: async (command) => {
-              await vscode.commands.executeCommand(command);
-            },
-          },
-          args.uri,
-          args.conflictId,
-          "current",
-        );
-        if (!ok) {
-          await vscode.window.showWarningMessage("未找到可处理的冲突");
-        }
-      },
+      (args: ConflictTreeCommandArguments) =>
+        acceptConflictAndAdvance("current", args, store, navigation, undoStore, syncUndoContext),
     ),
     vscode.commands.registerCommand(
       CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
-      async (args: ConflictTreeCommandArguments) => {
-        const ok = await applyConflictResolution(
-          store.getSnapshot(),
-          {
-            revealConflict: revealConflictInEditor,
-            runCommand: async (command) => {
-              await vscode.commands.executeCommand(command);
-            },
-          },
-          args.uri,
-          args.conflictId,
-          "incoming",
-        );
-        if (!ok) {
-          await vscode.window.showWarningMessage("未找到可处理的冲突");
-        }
-      },
+      (args: ConflictTreeCommandArguments) =>
+        acceptConflictAndAdvance("incoming", args, store, navigation, undoStore, syncUndoContext),
     ),
+    vscode.commands.registerCommand("conflictResolver.undoLastAccept", async () => {
+      const entries = undoStore.take();
+      syncUndoContext();
+      if (entries.length === 0) {
+        await vscode.window.showInformationMessage("没有可撤销的采纳操作");
+        return;
+      }
+      const result = await applyConflictUndo(entries);
+      await store.waitForChange();
+      if (result.failed === 0) {
+        await vscode.window.showInformationMessage(`已撤销：${entries[0]?.label ?? ""}`);
+      } else {
+        await vscode.window.showWarningMessage(
+          `已撤销 ${result.restored} 个文件，${result.failed} 个失败`,
+        );
+      }
+    }),
+    vscode.commands.registerCommand("conflictResolver.back", () => navigation.back()),
     vscode.commands.registerCommand(
       CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND,
       async (args: { uri: string }) => git.openMergeEditor(args.uri),
@@ -774,10 +846,10 @@ export function activate(context: vscode.ExtensionContext): void {
       );
     }),
     vscode.commands.registerCommand("conflictResolver.batchAcceptCurrent", async (args?: unknown) =>
-      runBatchResolution(args, "current", store, tree),
+      runBatchResolution(args, "current", store, tree, undoStore, navigation, syncUndoContext),
     ),
     vscode.commands.registerCommand("conflictResolver.batchAcceptIncoming", async (args?: unknown) =>
-      runBatchResolution(args, "incoming", store, tree),
+      runBatchResolution(args, "incoming", store, tree, undoStore, navigation, syncUndoContext),
     ),
     vscode.commands.registerCommand("conflictResolver.treeSelectAll", () => {
       tree.selectAll();
@@ -877,6 +949,7 @@ export function activate(context: vscode.ExtensionContext): void {
       void refreshConflictUi(snapshot);
     }),
   );
+  syncUndoContext();
 
   void store.refresh().then((snapshot) => refreshConflictUi(snapshot));
   void refreshRemoteMr();

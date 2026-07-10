@@ -18,9 +18,14 @@ export type ConflictNavigationCallbacks = {
   showMergeEditorFallback(uri: string, error: unknown): void | Promise<void>;
 };
 
+export type ConflictHistoryRef = { uri: string; conflictId?: string };
+
+const HISTORY_LIMIT = 30;
+
 export class ConflictNavigation {
   private snapshot: ConflictSnapshot;
   private readonly subscription: { dispose(): void };
+  private readonly history: ConflictHistoryRef[] = [];
 
   constructor(private readonly store: ConflictNavigationStore, private readonly callbacks: ConflictNavigationCallbacks) {
     this.snapshot = store.getSnapshot();
@@ -28,6 +33,10 @@ export class ConflictNavigation {
   }
 
   dispose(): void { this.subscription.dispose(); }
+
+  getHistorySize(): number {
+    return this.history.length;
+  }
 
   async next(): Promise<boolean> {
     return this.navigateWorkspace(1);
@@ -50,11 +59,88 @@ export class ConflictNavigation {
     if (file === undefined) return false;
     const conflict = conflictId === undefined ? undefined : file.locatedConflicts.find((item) => item.id === conflictId);
     if (conflict !== undefined) {
+      this.pushHistory();
       await this.callbacks.revealConflict(file.uri, conflict);
       return true;
     }
     if (file.gitUnmerged && file.locatedConflicts.length === 0) {
+      this.pushHistory();
       return this.openMergeEditor(file.uri);
+    }
+    return false;
+  }
+
+  async back(): Promise<boolean> {
+    while (this.history.length > 0) {
+      const previous = this.history.pop();
+      if (previous === undefined) {
+        break;
+      }
+      const active = this.callbacks.getActiveLocation();
+      const target = await this.goToSilent(previous.uri, previous.conflictId);
+      if (target) {
+        if (active !== undefined) {
+          this.history.push({ uri: active.uri });
+        }
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async goToSilent(uri: string, conflictId?: string): Promise<boolean> {
+    const file = this.findFile(uri);
+    if (file === undefined) return false;
+    if (conflictId !== undefined) {
+      const conflict = file.locatedConflicts.find((item) => item.id === conflictId);
+      if (conflict !== undefined) {
+        await this.callbacks.revealConflict(file.uri, conflict);
+        return true;
+      }
+    }
+    if (file.locatedConflicts.length > 0) {
+      await this.callbacks.revealConflict(file.uri, file.locatedConflicts[0]);
+      return true;
+    }
+    if (file.gitUnmerged) {
+      return this.openMergeEditor(file.uri);
+    }
+    return false;
+  }
+
+  private pushHistory(): void {
+    const active = this.callbacks.getActiveLocation();
+    if (active === undefined) {
+      return;
+    }
+    const last = this.history[this.history.length - 1];
+    if (last !== undefined && last.uri === active.uri) {
+      return;
+    }
+    this.history.push({ uri: active.uri });
+    if (this.history.length > HISTORY_LIMIT) {
+      this.history.shift();
+    }
+  }
+
+  async goToAfter(uri: string, line: number): Promise<boolean> {
+    const order = buildWorkspaceConflictOrder(this.snapshot);
+    if (order.length === 0) {
+      return false;
+    }
+    const active = this.callbacks.getActiveLocation();
+    const refUri = active?.uri ?? uri;
+    const refLine = active?.line ?? line;
+    const currentIndex = findWorkspaceConflictIndexAtOrBefore(order, refUri, refLine);
+    const startIndex = currentIndex >= 0 ? currentIndex + 1 : 0;
+    for (let index = startIndex; index < order.length; index += 1) {
+      const target = getWorkspaceConflictAt(order, index);
+      if (target === undefined) {
+        continue;
+      }
+      if (await this.goTo(target.uri, target.conflictId)) {
+        return true;
+      }
     }
     return false;
   }

@@ -351,4 +351,79 @@ describe("ConflictNavigation", () => {
     expect(callbacks.openMergeEditor).toHaveBeenCalledWith(uri);
     expect(callbacks.showMergeEditorFallback).toHaveBeenCalledWith(uri, error);
   });
+
+  it("history: back jumps to the previous reveal and tracks history size", async () => {
+    const uri = pathToFileURL("/repo/src/example.ts").toString();
+    const otherUri = pathToFileURL("/repo/src/other.ts").toString();
+    const store = new FakeConflictNavigationStore(
+      createSnapshot([
+        {
+          relativePath: "src/example.ts",
+          uri,
+          locatedConflicts: [createConflict("first", 5)],
+        },
+        {
+          relativePath: "src/other.ts",
+          uri: otherUri,
+          locatedConflicts: [createConflict("second", 8)],
+        },
+      ]),
+    );
+
+    let active: { uri: string; line: number } | undefined = undefined;
+    const callbacks = createCallbacks(() => active);
+    const navigation = new ConflictNavigation(store, callbacks);
+
+    await navigation.goTo(uri, "first");
+    active = { uri, line: 5 };
+    await navigation.goTo(otherUri, "second");
+    expect(callbacks.revealConflict).toHaveBeenCalledTimes(2);
+    expect(navigation.getHistorySize()).toBeGreaterThan(0);
+
+    active = { uri: otherUri, line: 8 };
+    await navigation.back();
+    expect(callbacks.revealConflict).toHaveBeenCalledTimes(3);
+    const lastCall = callbacks.revealConflict.mock.calls.at(-1);
+    expect(lastCall?.[0]).toBe(uri);
+  });
+
+  it("goToAfter lands on the next unresolved conflict", async () => {
+    const uri = pathToFileURL("/repo/src/example.ts").toString();
+    const otherUri = pathToFileURL("/repo/src/other.ts").toString();
+    const store = new FakeConflictNavigationStore(
+      createSnapshot([
+        {
+          relativePath: "src/example.ts",
+          uri,
+          locatedConflicts: [createConflict("first", 5), createConflict("third", 40)],
+        },
+        {
+          relativePath: "src/other.ts",
+          uri: otherUri,
+          locatedConflicts: [createConflict("second", 10)],
+        },
+      ]),
+    );
+
+    let active: { uri: string; line: number } = { uri, line: 0 };
+    const callbacks = createCallbacks(() => active);
+    const navigation = new ConflictNavigation(store, callbacks);
+
+    await navigation.goToAfter(uri, 0);
+    const lastCall = callbacks.revealConflict.mock.calls.at(-1);
+    expect(lastCall?.[0]).toBe(uri);
+    expect(lastCall?.[1]).toEqual(expect.objectContaining({ id: "first" }));
+
+    active = { uri, line: 5 };
+    await navigation.goToAfter(uri, 5);
+    const lastAfter = callbacks.revealConflict.mock.calls.at(-1);
+    expect(lastAfter?.[0]).toBe(uri);
+    expect(lastAfter?.[1]).toEqual(expect.objectContaining({ id: "third" }));
+
+    active = { uri, line: 40 };
+    await navigation.goToAfter(uri, 40);
+    const lastOther = callbacks.revealConflict.mock.calls.at(-1);
+    expect(lastOther?.[0]).toBe(otherUri);
+    expect(lastOther?.[1]).toEqual(expect.objectContaining({ id: "second" }));
+  });
 });

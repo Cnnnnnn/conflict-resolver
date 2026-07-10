@@ -275,6 +275,20 @@ export class ConflictStore {
     };
   }
 
+  waitForChange(timeoutMs = 1500): Promise<boolean> {
+    return new Promise<boolean>((resolve) => {
+      const dispose = this.onDidChange((snapshot) => {
+        dispose.dispose();
+        clearTimeout(timer);
+        resolve(true);
+      });
+      const timer = this.scheduleTimer(() => {
+        dispose.dispose();
+        resolve(false);
+      }, timeoutMs);
+    });
+  }
+
   scheduleRefresh(_reason: string, options?: { debounceMs?: number }): void {
     this.clearScheduledRefresh();
 
