@@ -23,6 +23,7 @@ class FakeDocument implements ConflictStoreDocument {
 
 class FakeDocumentLoader implements ConflictStoreDocumentLoader {
   private readonly repositoryRoots: string[];
+  private readonly loadErrors = new Map<string, Error>();
   private readonly texts = new Map<string, string>();
   private readonly openUris = new Set<string>();
 
@@ -32,6 +33,7 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
 
   setDocument(relativePath: string, text: string, options?: { open?: boolean }): void {
     const uri = pathToFileURL(`${REPOSITORY_ROOT}/${relativePath}`).toString();
+    this.loadErrors.delete(uri);
     this.texts.set(uri, text);
 
     if (options?.open ?? true) {
@@ -44,6 +46,14 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
 
   deleteDocument(relativePath: string): void {
     const uri = pathToFileURL(`${REPOSITORY_ROOT}/${relativePath}`).toString();
+    this.loadErrors.delete(uri);
+    this.texts.delete(uri);
+    this.openUris.delete(uri);
+  }
+
+  setLoadError(relativePath: string, error: Error): void {
+    const uri = pathToFileURL(`${REPOSITORY_ROOT}/${relativePath}`).toString();
+    this.loadErrors.set(uri, error);
     this.texts.delete(uri);
     this.openUris.delete(uri);
   }
@@ -53,6 +63,11 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
   }
 
   async loadDocument(uri: string): Promise<ConflictStoreDocument | undefined> {
+    const error = this.loadErrors.get(uri);
+    if (error !== undefined) {
+      throw error;
+    }
+
     const text = this.texts.get(uri);
     if (text === undefined) {
       return undefined;
@@ -206,6 +221,55 @@ describe("ConflictStore", () => {
       expect.objectContaining({
         relativePath: "notes.md",
         gitUnmerged: false,
+      }),
+    ]);
+  });
+
+  it("deduplicates repository root discovery across open documents in one repository", async () => {
+    const fakeDocuments = new FakeDocumentLoader();
+    fakeDocuments.setDocument("src/a.ts", markerText("a"));
+    fakeDocuments.setDocument("nested/src/b.ts", markerText("b"));
+
+    const fakeGit = new FakeGitRepositoryService();
+    fakeGit.setUnmerged([]);
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    const snapshot = await store.refresh();
+
+    expect(snapshot.files.map((file) => file.relativePath)).toEqual([
+      "nested/src/b.ts",
+      "src/a.ts",
+    ]);
+    expect(fakeGit.findRepositoryRoot).toHaveBeenCalledTimes(1);
+    expect(fakeGit.listUnmergedFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps git-unmerged files when document loading fails", async () => {
+    const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
+    fakeDocuments.setLoadError("missing.ts", new Error("EACCES: permission denied"));
+
+    const fakeGit = new FakeGitRepositoryService();
+    fakeGit.setUnmerged(["missing.ts"]);
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    const snapshot = await store.refresh();
+
+    expect(snapshot.gitOnlyCount).toBe(1);
+    expect(snapshot.locatedCount).toBe(0);
+    expect(snapshot.files).toEqual([
+      expect.objectContaining({
+        relativePath: "missing.ts",
+        gitUnmerged: true,
+        locatedConflicts: [],
+        parseError: "Failed to load unmerged file: EACCES: permission denied",
       }),
     ]);
   });

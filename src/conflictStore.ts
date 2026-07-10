@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { relative, resolve, sep } from "node:path";
+import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parseConflictMarkers } from "./conflictParser";
@@ -85,6 +85,23 @@ function canonicalizeUri(uri: string): string {
   }
 }
 
+function toFileSystemPath(uri: string): string | undefined {
+  try {
+    return resolve(new URL(uri).protocol === "file:" ? fileURLToPath(uri) : uri);
+  } catch {
+    return undefined;
+  }
+}
+
+function canonicalizeDirectory(uri: string): string {
+  const fileSystemPath = toFileSystemPath(uri);
+  if (fileSystemPath === undefined) {
+    return uri;
+  }
+
+  return dirname(fileSystemPath);
+}
+
 function toRepositoryRelativePath(
   repositoryRoot: string,
   uri: string,
@@ -134,6 +151,30 @@ function hasLocatedConflictCandidate(text: string): boolean {
     text.includes("=======") ||
     text.includes(">>>>>>>")
   );
+}
+
+function findContainingRepositoryRoot(
+  repositoryRoots: readonly string[],
+  uri: string,
+): string | undefined {
+  const matches = repositoryRoots.filter(
+    (repositoryRoot) =>
+      toRepositoryRelativePath(repositoryRoot, uri) !== undefined,
+  );
+
+  if (matches.length === 0) {
+    return undefined;
+  }
+
+  matches.sort((left, right) => right.length - left.length);
+  return matches[0];
+}
+
+function formatLoadError(error: unknown): string {
+  const message =
+    error instanceof Error ? error.message : String(error);
+
+  return `Failed to load unmerged file: ${message}`;
 }
 
 type ConflictRecord = {
@@ -233,19 +274,50 @@ export class ConflictStore {
 
   private async buildSnapshot(): Promise<ConflictSnapshot> {
     const openDocuments = [...await this.documents.getOpenDocuments()];
-    const openDocumentState = await Promise.all(
-      openDocuments.map(async (document) => ({
+    const repositoryRoots = new Set(
+      [...await this.documents.getRepositoryRoots()].map((repositoryRoot) =>
+        resolve(repositoryRoot),
+      ),
+    );
+    const repositoryRootDiscoveries = new Map<string, Promise<string | undefined>>();
+
+    const resolveRepositoryRoot = async (uri: string): Promise<string | undefined> => {
+      const knownRepositoryRoot = findContainingRepositoryRoot(
+        [...repositoryRoots],
+        uri,
+      );
+      if (knownRepositoryRoot !== undefined) {
+        return knownRepositoryRoot;
+      }
+
+      const directoryKey = canonicalizeDirectory(uri);
+      const cachedDiscovery = repositoryRootDiscoveries.get(directoryKey);
+      if (cachedDiscovery !== undefined) {
+        return cachedDiscovery;
+      }
+
+      const discovery = (async () => {
+        const discoveredRoot = await this.git.findRepositoryRoot(uri);
+        if (discoveredRoot !== undefined) {
+          const normalizedRoot = resolve(discoveredRoot);
+          repositoryRoots.add(normalizedRoot);
+          return normalizedRoot;
+        }
+
+        return undefined;
+      })();
+
+      repositoryRootDiscoveries.set(directoryKey, discovery);
+      return discovery;
+    };
+
+    const openDocumentState = [];
+    for (const document of openDocuments) {
+      openDocumentState.push({
         document,
         key: canonicalizeUri(document.uri),
-        repositoryRoot: await this.git.findRepositoryRoot(document.uri),
-      })),
-    );
-
-    const repositoryRoots = new Set(await this.documents.getRepositoryRoots());
-    for (const entry of openDocumentState) {
-      if (entry.repositoryRoot !== undefined) {
-        repositoryRoots.add(entry.repositoryRoot);
-      }
+        repositoryRoot: await resolveRepositoryRoot(document.uri),
+      });
     }
 
     const files = new Map<string, ConflictRecord>();
@@ -295,19 +367,28 @@ export class ConflictStore {
     files: Map<string, ConflictRecord>,
     gitFile: GitUnmergedFile,
   ): Promise<void> {
-    const text = await this.loadDocumentText(gitFile.uri);
-    const parsed = this.parseConflicts(text);
     const key = canonicalizeUri(gitFile.uri);
     const existing = files.get(key);
+    let locatedConflicts: ConflictBlock[] = [];
+    let parseError: string | undefined;
+
+    try {
+      const text = await this.loadDocumentText(gitFile.uri);
+      const parsed = this.parseConflicts(text);
+      locatedConflicts = parsed.blocks;
+      parseError = parsed.error;
+    } catch (error) {
+      parseError = formatLoadError(error);
+    }
 
     files.set(key, {
       file: {
         uri: existing?.file.uri ?? gitFile.uri,
         repositoryRoot: gitFile.repositoryRoot,
         relativePath: gitFile.relativePath,
-        locatedConflicts: parsed.blocks,
+        locatedConflicts,
         gitUnmerged: true,
-        parseError: parsed.error,
+        parseError,
       },
     });
   }
