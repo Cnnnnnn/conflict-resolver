@@ -18,6 +18,7 @@ export type GitCommandRunner = (
 ) => Promise<GitCommandResult>;
 
 export type MergeEditorCommandRunner = (uri: string) => Promise<void>;
+export type RepositoryMarkerProbe = (candidatePath: string) => Promise<boolean>;
 
 type GitServiceErrorCode =
   | "git-command-failed"
@@ -129,7 +130,7 @@ function createGitCommandRunner(): GitCommandRunner {
 }
 
 function normalizeRepositoryRelativePath(relativePath: string): string {
-  const normalized = posix.normalize(relativePath.replaceAll("\\", "/"));
+  const normalized = posix.normalize(relativePath);
 
   if (
     normalized.length === 0 ||
@@ -257,6 +258,7 @@ async function hasRepositoryMarkerInAncestors(
 async function isNotRepositoryResult(
   candidatePath: string,
   error: GitCommandError,
+  repositoryMarkerProbe: RepositoryMarkerProbe,
 ): Promise<boolean> {
   if (error.exitCode !== 128) {
     return false;
@@ -272,16 +274,18 @@ async function isNotRepositoryResult(
     return false;
   }
 
-  return !(await hasRepositoryMarkerInAncestors(candidatePath));
+  return !(await repositoryMarkerProbe(candidatePath));
 }
 
 export class GitRepositoryService {
   private readonly runGit: GitCommandRunner;
   private readonly runMergeEditorCommand: MergeEditorCommandRunner;
+  private readonly hasRepositoryMarkerInAncestors: RepositoryMarkerProbe;
 
   constructor(options?: {
     runGit?: GitCommandRunner;
     runMergeEditorCommand?: MergeEditorCommandRunner;
+    hasRepositoryMarkerInAncestors?: RepositoryMarkerProbe;
   }) {
     this.runGit = options?.runGit ?? createGitCommandRunner();
     this.runMergeEditorCommand =
@@ -293,6 +297,8 @@ export class GitRepositoryService {
           "No merge editor command runner has been configured",
         );
       });
+    this.hasRepositoryMarkerInAncestors =
+      options?.hasRepositoryMarkerInAncestors ?? hasRepositoryMarkerInAncestors;
   }
 
   async findRepositoryRoot(uri: string): Promise<string | undefined> {
@@ -329,7 +335,13 @@ export class GitRepositoryService {
         }
 
         try {
-          if (await isNotRepositoryResult(candidatePath, error)) {
+          if (
+            await isNotRepositoryResult(
+              candidatePath,
+              error,
+              this.hasRepositoryMarkerInAncestors,
+            )
+          ) {
             return undefined;
           }
         } catch (discoveryError) {

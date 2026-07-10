@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmod, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -207,21 +207,22 @@ describe("GitRepositoryService", () => {
     );
   });
 
-  it("does not leak raw filesystem errors while confirming a missing repository marker", async () => {
-    const directory = await createTempDirectory(
-      "git-repo-service-marker-permission-denied-",
-    );
+  it("wraps ancestor marker probe failures in a typed discovery error", async () => {
+    const directory = await createTempDirectory("git-repo-service-marker-probe-");
     tempDirectories.push(directory);
 
     const restrictedDirectory = join(directory, "restricted");
     await mkdir(restrictedDirectory, { recursive: true });
-    await chmod(restrictedDirectory, 0o000);
 
     const permissionError = Object.assign(new Error("permission denied"), {
       code: "EACCES",
     });
+    const hasRepositoryMarkerInAncestors = vi
+      .fn()
+      .mockRejectedValue(permissionError);
 
     const service = new GitRepositoryService({
+      hasRepositoryMarkerInAncestors,
       runGit: vi.fn().mockRejectedValue(
         new GitCommandError(
           ["-C", restrictedDirectory, "rev-parse", "--show-toplevel"],
@@ -231,21 +232,19 @@ describe("GitRepositoryService", () => {
       ),
     });
 
-    try {
-      await expect(
-        service.findRepositoryRoot(pathToFileURL(restrictedDirectory).toString()),
-      ).rejects.toSatisfy(
-        (error: unknown) =>
-          error instanceof GitServiceError &&
-          error.code === "git-command-failed" &&
-          error.operation === "findRepositoryRoot" &&
-          error.cause instanceof Error &&
-          "code" in error.cause &&
-          error.cause.code === permissionError.code,
-      );
-    } finally {
-      await chmod(restrictedDirectory, 0o700);
-    }
+    await expect(
+      service.findRepositoryRoot(pathToFileURL(restrictedDirectory).toString()),
+    ).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof GitServiceError &&
+        error.code === "git-command-failed" &&
+        error.operation === "findRepositoryRoot" &&
+        error.cause instanceof Error &&
+        "code" in error.cause &&
+        error.cause.code === permissionError.code,
+    );
+
+    expect(hasRepositoryMarkerInAncestors).toHaveBeenCalledWith(restrictedDirectory);
   });
 
   it("maps NUL-delimited unmerged records into unique repository-relative paths", async () => {
@@ -279,6 +278,24 @@ describe("GitRepositoryService", () => {
     ]);
 
     expect(runGit).toHaveBeenCalledWith(["-C", repositoryRoot, "ls-files", "-u", "-z"]);
+  });
+
+  it("preserves literal backslashes in git-reported filenames", async () => {
+    const repositoryRoot = join(tmpdir(), "repo-root");
+    const runGit: GitCommandRunner = vi.fn().mockResolvedValue({
+      stderr: "",
+      stdout: createLsFilesOutput([{ stage: 1, relativePath: "a\\b.txt" }]),
+    });
+
+    const service = new GitRepositoryService({ runGit });
+
+    await expect(service.listUnmergedFiles(repositoryRoot)).resolves.toEqual([
+      {
+        repositoryRoot,
+        relativePath: "a\\b.txt",
+        uri: pathToFileURL(join(repositoryRoot, "a\\b.txt")).toString(),
+      },
+    ]);
   });
 
   it("rejects unsafe relative paths from git output", async () => {
