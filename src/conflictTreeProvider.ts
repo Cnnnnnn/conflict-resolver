@@ -114,6 +114,7 @@ export type ConflictTreeConflictItem = ConflictTreeItemBase & {
   startLine: number;
   endLine: number;
   command: vscode.Command;
+  checked?: boolean;
 };
 
 export type ConflictTreeRemoteMrItem = ConflictTreeItemBase & {
@@ -161,6 +162,10 @@ type ConflictTreeProviderOptions = {
   getFileText?: ConflictTreeTextProvider;
   createThemeIcon?: ThemeIconFactory;
 };
+
+export type ConflictTreeSelection = ReadonlySet<string>;
+
+export type ConflictTreeFilterMode = "all" | "source" | "lock";
 
 function createConflictCommandArguments(
   uri: string,
@@ -363,9 +368,10 @@ function createConflictItem(
   conflictIndex: number,
   fileText: string | undefined,
   createThemeIcon?: ThemeIconFactory,
+  checked = false,
 ): ConflictTreeConflictItem {
   const args = createConflictCommandArguments(file.uri, conflict.id);
-  return {
+  const item: ConflictTreeConflictItem = {
     id: `conflict:${file.uri}:${conflict.id}`,
     kind: "conflict",
     contextValue: "conflictTreeConflict",
@@ -387,7 +393,9 @@ function createConflictItem(
       createAcceptIncomingButton(file.uri, conflict.id, createThemeIcon),
     ],
     collapsibleState: COLLAPSE_NONE,
+    checked,
   };
+  return item;
 }
 
 function formatMrLabel(mr: MergeRequestConflict): string {
@@ -568,6 +576,8 @@ export class ConflictTreeProvider
   private snapshot: ConflictSnapshot;
   private remoteSnapshot: RemoteMergeRequestSnapshot;
   private workState: ConflictWorkState = EMPTY_CONFLICT_WORK_STATE;
+  private filterMode: ConflictTreeFilterMode = "all";
+  private readonly selection = new Set<string>();
   private readonly changeEmitter = new SimpleEmitter<
     ConflictTreeItem | undefined
   >();
@@ -611,11 +621,94 @@ export class ConflictTreeProvider
     this.changeEmitter.fire(undefined);
   }
 
+  setFilterMode(mode: ConflictTreeFilterMode): void {
+    if (this.filterMode === mode) {
+      return;
+    }
+    this.filterMode = mode;
+    this.selection.clear();
+    this.changeEmitter.fire(undefined);
+  }
+
+  getFilterMode(): ConflictTreeFilterMode {
+    return this.filterMode;
+  }
+
+  getSelection(): ConflictTreeSelection {
+    return new Set(this.selection);
+  }
+
+  toggleSelection(item: ConflictTreeConflictItem): void {
+    const key = `${item.uri}::${item.conflictId}`;
+    if (this.selection.has(key)) {
+      this.selection.delete(key);
+    } else {
+      this.selection.add(key);
+    }
+    this.changeEmitter.fire(item);
+  }
+
+  selectAll(): void {
+    for (const file of this.snapshot.files) {
+      if (!this.fileMatchesFilter(file.relativePath)) {
+        continue;
+      }
+      for (const conflict of file.locatedConflicts) {
+        this.selection.add(`${file.uri}::${conflict.id}`);
+      }
+    }
+    this.changeEmitter.fire(undefined);
+  }
+
+  selectFile(uri: string): void {
+    const file = this.snapshot.files.find((candidate) => candidate.uri === uri);
+    if (file === undefined) {
+      return;
+    }
+    for (const conflict of file.locatedConflicts) {
+      this.selection.add(`${file.uri}::${conflict.id}`);
+    }
+    this.changeEmitter.fire(undefined);
+  }
+
+  clearSelection(): void {
+    if (this.selection.size === 0) {
+      return;
+    }
+    this.selection.clear();
+    this.changeEmitter.fire(undefined);
+  }
+
+  private fileMatchesFilter(relativePath: string): boolean {
+    const lock = relativePath.endsWith("pnpm-lock.yaml") ||
+      relativePath.endsWith("package-lock.json") ||
+      relativePath.endsWith("yarn.lock") ||
+      relativePath.endsWith("Cargo.lock") ||
+      relativePath.endsWith("composer.lock") ||
+      relativePath.endsWith("Gemfile.lock") ||
+      relativePath.endsWith("Pipfile.lock") ||
+      relativePath.endsWith("poetry.lock");
+    if (this.filterMode === "all") {
+      return true;
+    }
+    if (this.filterMode === "lock") {
+      return lock;
+    }
+    return !lock;
+  }
+
   getCompletionMessage(): string | undefined {
     return formatCompletionLabel(getCompletionKind(this.snapshot, this.workState), this.snapshot);
   }
 
   getTreeItem(element: ConflictTreeItem): ConflictTreeItem {
+    if (element.kind === "conflict") {
+      return {
+        ...element,
+        checked: this.selection.has(`${element.uri}::${element.conflictId}`),
+      };
+    }
+
     if (element.kind === "file" && this.parseUri !== undefined) {
       return {
         ...element,
@@ -628,12 +721,14 @@ export class ConflictTreeProvider
 
   async getChildren(element?: ConflictTreeItem): Promise<ConflictTreeItem[]> {
     if (element === undefined) {
-      const locatedFiles = getLocatedFiles(this.snapshot);
-      const gitOnlyFiles = getGitOnlyFiles(this.snapshot);
-      const locatedCount = locatedFiles.reduce(
-        (count, file) => count + file.locatedConflicts.length,
-        0,
+      const locatedFiles = getLocatedFiles(this.snapshot).filter((file) =>
+        this.fileMatchesFilter(file.relativePath),
       );
+      const gitOnlyFiles = getGitOnlyFiles(this.snapshot).filter((file) =>
+        this.fileMatchesFilter(file.relativePath),
+      );
+      const locatedCount = locatedFiles
+        .reduce((count, file) => count + file.locatedConflicts.length, 0);
 
       const items: ConflictTreeItem[] = [];
       const completionLabel = formatCompletionLabel(
@@ -677,9 +772,13 @@ export class ConflictTreeProvider
 
       const files =
         element.groupKey === "located"
-          ? getLocatedFiles(this.snapshot)
+          ? getLocatedFiles(this.snapshot).filter((file) =>
+              this.fileMatchesFilter(file.relativePath),
+            )
           : element.groupKey === "gitOnly"
-            ? getGitOnlyFiles(this.snapshot)
+            ? getGitOnlyFiles(this.snapshot).filter((file) =>
+                this.fileMatchesFilter(file.relativePath),
+              )
             : [];
 
       return files.map((file) =>
@@ -693,6 +792,10 @@ export class ConflictTreeProvider
         return [];
       }
 
+      if (!this.fileMatchesFilter(file.relativePath)) {
+        return [];
+      }
+
       return [...file.locatedConflicts]
         .sort(compareConflicts)
         .map((conflict, index) =>
@@ -702,6 +805,7 @@ export class ConflictTreeProvider
             index + 1,
             this.getFileText?.(file.uri),
             this.createThemeIcon,
+            this.selection.has(`${file.uri}::${conflict.id}`),
           ),
         );
     }

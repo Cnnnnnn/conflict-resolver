@@ -235,7 +235,7 @@ export class ConflictStore {
   private readonly clearTimer: typeof clearTimeout;
   private readonly debounceMs: number;
   private readonly documents: ConflictStoreDocumentLoader;
-  private readonly filter: ConflictFilter;
+  private filter: ConflictFilter;
   private readonly git: ConflictStoreGitService;
   private readonly listeners = new Set<ConflictStoreChangeListener>();
   private readonly now: () => number;
@@ -283,6 +283,10 @@ export class ConflictStore {
       this.refreshTimer = undefined;
       void this.refresh();
     }, debounceMs);
+  }
+
+  updateFilter(filter: ConflictFilter): void {
+    this.filter = filter;
   }
 
   scheduleImmediateRefresh(_reason: string): void {
@@ -527,7 +531,7 @@ export class ConflictStore {
 
     const snapshotFiles = [...files.values()]
       .map((entry) => entry.file)
-      .filter((file) => this.filter.isIncluded(file.relativePath))
+      .filter((file) => this.filter.isIncluded(file.relativePath) && this.filter.matchesMode(file.relativePath))
       .filter(
         (file) =>
           !shouldOmitResolvedGitFile(

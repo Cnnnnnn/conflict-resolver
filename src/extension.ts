@@ -26,8 +26,15 @@ import {
   shouldNotifyLocatedConflictsCleared,
   updateConflictWorkState,
 } from "./conflictCompletion";
-import { applyConflictResolution } from "./conflictResolution";
+import { createConflictFilter, isLockFilePath, type ConflictFilterMode } from "./conflictFilter";
 import { GitRepositoryService } from "./gitRepositoryService";
+import {
+  applyConflictResolution,
+  applyBatchConflictResolution,
+  collectBatchTargets,
+  formatBatchResolutionMessage,
+  type ConflictResolutionSide,
+} from "./conflictResolution";
 import {
   buildScmEditorSlotContext,
   canonicalizeConflictUri,
@@ -347,6 +354,129 @@ async function revealConflictInEditor(uri: string, conflict: ConflictBlock): Pro
   );
 }
 
+async function updateFilterMode(mode: ConflictFilterMode): Promise<void> {
+  const config = vscode.workspace.getConfiguration("conflictResolver");
+  await config.update("treeFilterMode", mode, vscode.ConfigurationTarget.Workspace);
+}
+
+async function runTreeSearch(
+  store: ConflictStore,
+  navigation: ConflictNavigation,
+  git: GitRepositoryService,
+): Promise<void> {
+  const query = await vscode.window.showInputBox({
+    prompt: "搜索冲突（按文件路径或行号）",
+    placeHolder: "输入关键字、文件名或行号",
+  });
+  if (query === undefined) {
+    return;
+  }
+  const trimmed = query.trim();
+  if (trimmed.length === 0) {
+    return;
+  }
+
+  const snapshot = store.getSnapshot();
+  const lower = trimmed.toLowerCase();
+  const candidates = snapshot.files.filter((file) =>
+    file.relativePath.toLowerCase().includes(lower) ||
+    file.locatedConflicts.some((conflict) => `${conflict.startLine + 1}`.includes(lower)),
+  );
+  if (candidates.length === 0) {
+    await vscode.window.showInformationMessage(`没有找到匹配 "${trimmed}" 的冲突文件`);
+    return;
+  }
+
+  type CandidateFile = typeof candidates[number];
+  const gotoFirst = async (file: CandidateFile): Promise<void> => {
+    const conflict = file.locatedConflicts[0];
+    if (conflict !== undefined) {
+      await navigation.goTo(file.uri, conflict.id);
+    } else {
+      await git.openMergeEditor(file.uri);
+    }
+  };
+
+  if (candidates.length === 1) {
+    await gotoFirst(candidates[0]);
+    return;
+  }
+
+  type CandidatePick = { label: string; description: string; file: CandidateFile };
+  const picks: CandidatePick[] = candidates.map((file) => ({
+    label: file.relativePath,
+    description: `${file.locatedConflicts.length} 个可定位冲突`,
+    file,
+  }));
+  const chosen = await vscode.window.showQuickPick<CandidatePick>(picks, {
+    placeHolder: "选择要定位的文件",
+  });
+  if (chosen === undefined) {
+    return;
+  }
+  await gotoFirst(chosen.file);
+}
+
+async function runBatchResolution(
+  args: unknown,
+  side: ConflictResolutionSide,
+  store: ConflictStore,
+  tree: ConflictTreeProvider,
+): Promise<void> {
+  const snapshot = store.getSnapshot();
+  const selection = tree.getSelection();
+
+  let targets: { uri: string; conflictId: string }[] = [];
+
+  if (
+    args !== undefined &&
+    typeof args === "object" &&
+    args !== null &&
+    "uri" in args &&
+    "conflictId" in args
+  ) {
+    const candidate = args as { uri: unknown; conflictId: unknown };
+    if (typeof candidate.uri === "string" && typeof candidate.conflictId === "string") {
+      targets = [{ uri: candidate.uri, conflictId: candidate.conflictId }];
+    }
+  }
+
+  if (targets.length === 0 && selection.size > 0) {
+    for (const key of selection) {
+      const [uri, conflictId] = key.split("::");
+      if (uri !== undefined && conflictId !== undefined) {
+        targets.push({ uri, conflictId });
+      }
+    }
+  }
+
+  if (targets.length === 0) {
+    targets = collectBatchTargets(snapshot, { kind: "all" });
+    if (targets.length === 0) {
+      await vscode.window.showInformationMessage("当前没有可处理的冲突");
+      return;
+    }
+  }
+
+  const summary = await applyBatchConflictResolution(
+    snapshot,
+    {
+      revealConflict: revealConflictInEditor,
+      runCommand: async (command: string) => {
+        await vscode.commands.executeCommand(command);
+      },
+    },
+    targets,
+    side,
+  );
+
+  if (selection.size > 0) {
+    tree.clearSelection();
+  }
+
+  await vscode.window.showInformationMessage(formatBatchResolutionMessage(side, summary));
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const git = new GitRepositoryService({
     runMergeEditorCommand: async (uri) => {
@@ -359,6 +489,14 @@ export function activate(context: vscode.ExtensionContext): void {
     includeLockFiles: vscode.workspace
       .getConfiguration("conflictResolver")
       .get<boolean>("includeLockFiles", false),
+    filter: createConflictFilter({
+      includeLockFiles: vscode.workspace
+        .getConfiguration("conflictResolver")
+        .get<boolean>("includeLockFiles", false),
+      mode: vscode.workspace
+        .getConfiguration("conflictResolver")
+        .get<ConflictFilterMode>("treeFilterMode", "all"),
+    }),
   });
   const remoteMr = new MergeRequestConflictService({ config: createMergeRequestConfig() });
   const tree = new ConflictTreeProvider(
@@ -370,6 +508,10 @@ export function activate(context: vscode.ExtensionContext): void {
       createThemeIcon: (id) => new vscode.ThemeIcon(id),
     },
   );
+  const initialFilterMode = vscode.workspace
+    .getConfiguration("conflictResolver")
+    .get<ConflictFilterMode>("treeFilterMode", "all");
+  tree.setFilterMode(initialFilterMode);
   const treeView = vscode.window.createTreeView("conflictResolver.tree", { treeDataProvider: tree });
   let conflictWorkState = EMPTY_CONFLICT_WORK_STATE;
   let locatedClearedNotified = false;
@@ -631,6 +773,36 @@ export function activate(context: vscode.ExtensionContext): void {
         next ? "已启用 lock 文件扫描" : "已跳过 lock 文件扫描",
       );
     }),
+    vscode.commands.registerCommand("conflictResolver.batchAcceptCurrent", async (args?: unknown) =>
+      runBatchResolution(args, "current", store, tree),
+    ),
+    vscode.commands.registerCommand("conflictResolver.batchAcceptIncoming", async (args?: unknown) =>
+      runBatchResolution(args, "incoming", store, tree),
+    ),
+    vscode.commands.registerCommand("conflictResolver.treeSelectAll", () => {
+      tree.selectAll();
+    }),
+    vscode.commands.registerCommand("conflictResolver.treeClearSelection", () => {
+      tree.clearSelection();
+    }),
+    vscode.commands.registerCommand(
+      "conflictResolver.treeSelectFile",
+      (args: { uri: string }) => {
+        tree.selectFile(args.uri);
+      },
+    ),
+    vscode.commands.registerCommand("conflictResolver.treeFilterAll", async () => {
+      await updateFilterMode("all");
+    }),
+    vscode.commands.registerCommand("conflictResolver.treeFilterSource", async () => {
+      await updateFilterMode("source");
+    }),
+    vscode.commands.registerCommand("conflictResolver.treeFilterLock", async () => {
+      await updateFilterMode("lock");
+    }),
+    vscode.commands.registerCommand("conflictResolver.treeSearch", async () => {
+      await runTreeSearch(store, navigation, git);
+    }),
     treeView.onDidChangeVisibility((event) => {
       if (event.visible) {
         store.scheduleRefresh("panel-visible");
@@ -679,8 +851,27 @@ export function activate(context: vscode.ExtensionContext): void {
         void refreshRemoteMr(true);
       }
       if (event.affectsConfiguration("conflictResolver.includeLockFiles")) {
+        const config = vscode.workspace.getConfiguration("conflictResolver");
+        const include = config.get<boolean>("includeLockFiles", false);
+        const mode = config.get<ConflictFilterMode>("treeFilterMode", "all");
+        store.updateFilter(createConflictFilter({ includeLockFiles: include, mode }));
         store.scheduleImmediateRefresh("lock-files-toggle");
       }
+      if (event.affectsConfiguration("conflictResolver.treeFilterMode")) {
+        const config = vscode.workspace.getConfiguration("conflictResolver");
+        const include = config.get<boolean>("includeLockFiles", false);
+        const mode = config.get<ConflictFilterMode>("treeFilterMode", "all");
+        tree.setFilterMode(mode);
+        store.updateFilter(createConflictFilter({ includeLockFiles: include, mode }));
+        store.scheduleImmediateRefresh("filter-mode-toggle");
+      }
+    }),
+    tree.onDidChangeTreeData(() => {
+      void vscode.commands.executeCommand(
+        "setContext",
+        "conflictResolver.hasSelection",
+        tree.getSelection().size > 0,
+      );
     }),
     store.onDidChange((snapshot) => {
       void refreshConflictUi(snapshot);

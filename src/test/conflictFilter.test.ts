@@ -26,4 +26,22 @@ describe("conflictFilter", () => {
     const filter = createConflictFilter({ includeLockFiles: true });
     expect(filter.isIncluded("pnpm-lock.yaml")).toBe(true);
   });
+
+  it("matches mode: all accepts every path", () => {
+    const filter = createConflictFilter({ includeLockFiles: true, mode: "all" });
+    expect(filter.matchesMode("pnpm-lock.yaml")).toBe(true);
+    expect(filter.matchesMode("src/index.ts")).toBe(true);
+  });
+
+  it("matches mode: source excludes lock files", () => {
+    const filter = createConflictFilter({ includeLockFiles: true, mode: "source" });
+    expect(filter.matchesMode("pnpm-lock.yaml")).toBe(false);
+    expect(filter.matchesMode("src/index.ts")).toBe(true);
+  });
+
+  it("matches mode: lock includes only lock files", () => {
+    const filter = createConflictFilter({ includeLockFiles: true, mode: "lock" });
+    expect(filter.matchesMode("pnpm-lock.yaml")).toBe(true);
+    expect(filter.matchesMode("src/index.ts")).toBe(false);
+  });
 });

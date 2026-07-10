@@ -3,7 +3,7 @@
   "displayName": "Conflict Resolver",
   "description": "VS Code and Cursor extension for locating and navigating Git merge conflicts.",
   "icon": "resources/icon.png",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "publisher": "shienLiang",
   "license": "MIT",
   "author": {
@@ -207,6 +207,47 @@
         "command": "conflictResolver.scmOpenMergeEditor",
         "title": "打开 Merge Editor",
         "category": "Conflict Resolver"
+      },
+      {
+        "command": "conflictResolver.batchAcceptCurrent",
+        "title": "Conflict Resolver: Accept Selected (Current)",
+        "icon": "$(check)"
+      },
+      {
+        "command": "conflictResolver.batchAcceptIncoming",
+        "title": "Conflict Resolver: Accept Selected (Incoming)",
+        "icon": "$(arrow-right)"
+      },
+      {
+        "command": "conflictResolver.treeSelectAll",
+        "title": "Conflict Resolver: Select All Conflicts",
+        "icon": "$(check-all)"
+      },
+      {
+        "command": "conflictResolver.treeClearSelection",
+        "title": "Conflict Resolver: Clear Selection",
+        "icon": "$(close)"
+      },
+      {
+        "command": "conflictResolver.treeSelectFile",
+        "title": "Conflict Resolver: Select Conflicts in File",
+        "icon": "$(selection)"
+      },
+      {
+        "command": "conflictResolver.treeFilterAll",
+        "title": "Conflict Resolver: Show All Conflicts"
+      },
+      {
+        "command": "conflictResolver.treeFilterSource",
+        "title": "Conflict Resolver: Show Source Conflicts Only"
+      },
+      {
+        "command": "conflictResolver.treeFilterLock",
+        "title": "Conflict Resolver: Show Lock File Conflicts Only"
+      },
+      {
+        "command": "conflictResolver.treeSearch",
+        "title": "Conflict Resolver: Search Conflicts"
       }
     ],
     "keybindings": [
@@ -219,6 +260,11 @@
         "command": "conflictResolver.nextConflict",
         "key": "alt+]",
         "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.treeSearch",
+        "key": "ctrl+shift+f",
+        "when": "view == conflictResolver.tree"
       }
     ],
     "submenus": [
@@ -250,6 +296,43 @@
           "command": "conflictResolver.nextConflict",
           "when": "view == conflictResolver.tree && conflictResolver.hasLocatedConflicts",
           "group": "navigation@2"
+        },
+        {
+          "command": "conflictResolver.treeSearch",
+          "when": "view == conflictResolver.tree",
+          "group": "navigation@3"
+        },
+        {
+          "command": "conflictResolver.treeSelectAll",
+          "when": "view == conflictResolver.tree && conflictResolver.hasLocatedConflicts",
+          "group": "navigation@4"
+        },
+        {
+          "command": "conflictResolver.batchAcceptCurrent",
+          "when": "view == conflictResolver.tree && conflictResolver.hasSelection",
+          "group": "navigation@5"
+        },
+        {
+          "command": "conflictResolver.batchAcceptIncoming",
+          "when": "view == conflictResolver.tree && conflictResolver.hasSelection",
+          "group": "navigation@6"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "conflictResolver.batchAcceptCurrent",
+          "when": "view == conflictResolver.tree && viewItem == conflictTreeConflict",
+          "group": "1_accept"
+        },
+        {
+          "command": "conflictResolver.batchAcceptIncoming",
+          "when": "view == conflictResolver.tree && viewItem == conflictTreeConflict",
+          "group": "1_accept"
+        },
+        {
+          "command": "conflictResolver.treeSelectFile",
+          "when": "view == conflictResolver.tree && viewItem == conflictTreeFile",
+          "group": "2_select"
         }
       ],
       "scm/resourceState/context": [
@@ -302,6 +385,12 @@
           "type": "boolean",
           "default": false,
           "description": "是否扫描 lock 文件（如 pnpm-lock.yaml、package-lock.json 等）。默认跳过以提升性能。"
+        },
+        "conflictResolver.treeFilterMode": {
+          "type": "string",
+          "enum": ["all", "source", "lock"],
+          "default": "all",
+          "description": "冲突面板的过滤模式：all = 全部，source = 仅源代码，lock = 仅 lock 文件。"
         }
       }
     },

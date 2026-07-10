@@ -52,3 +52,84 @@ export async function applyConflictResolution(
   );
   return true;
 }
+
+export type BatchResolutionTarget = { uri: string; conflictId: string };
+
+export type BatchResolutionSummary = {
+  total: number;
+  resolved: number;
+  skipped: number;
+  failed: number;
+};
+
+const TARGET_BATCH_SIZE = 25;
+
+export async function applyBatchConflictResolution(
+  snapshot: ConflictSnapshot,
+  callbacks: ConflictResolutionCallbacks,
+  targets: readonly BatchResolutionTarget[],
+  side: ConflictResolutionSide,
+): Promise<BatchResolutionSummary> {
+  const summary: BatchResolutionSummary = {
+    total: targets.length,
+    resolved: 0,
+    skipped: 0,
+    failed: 0,
+  };
+
+  for (let index = 0; index < targets.length; index += TARGET_BATCH_SIZE) {
+    const batch = targets.slice(index, index + TARGET_BATCH_SIZE);
+    for (const target of batch) {
+      const ok = await applyConflictResolution(
+        snapshot,
+        callbacks,
+        target.uri,
+        target.conflictId,
+        side,
+      );
+      if (ok) {
+        summary.resolved += 1;
+      } else {
+        summary.skipped += 1;
+      }
+    }
+    if (index + TARGET_BATCH_SIZE < targets.length) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+
+  return summary;
+}
+
+export function collectBatchTargets(
+  snapshot: ConflictSnapshot,
+  scope: BatchResolutionScope,
+): BatchResolutionTarget[] {
+  const targets: BatchResolutionTarget[] = [];
+
+  for (const file of snapshot.files) {
+    if (scope.kind === "file" && file.uri !== scope.fileUri) {
+      continue;
+    }
+    for (const conflict of file.locatedConflicts) {
+      targets.push({ uri: file.uri, conflictId: conflict.id });
+    }
+  }
+
+  return targets;
+}
+
+export type BatchResolutionScope =
+  | { kind: "all" }
+  | { kind: "file"; fileUri: string };
+
+export function formatBatchResolutionMessage(
+  side: ConflictResolutionSide,
+  summary: BatchResolutionSummary,
+): string {
+  const sideLabel = side === "current" ? "采用当前" : "采用传入";
+  if (summary.failed === 0) {
+    return `${sideLabel}：处理 ${summary.resolved}/${summary.total}，跳过 ${summary.skipped}`;
+  }
+  return `${sideLabel}：处理 ${summary.resolved}/${summary.total}，跳过 ${summary.skipped}，失败 ${summary.failed}`;
+}
