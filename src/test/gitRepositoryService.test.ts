@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -43,6 +43,7 @@ describe("GitRepositoryService", () => {
   const tempDirectories: string[] = [];
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await Promise.all(
       tempDirectories.map(async (directory) => {
         await rm(directory, { force: true, recursive: true });
@@ -124,6 +125,28 @@ describe("GitRepositoryService", () => {
     );
   });
 
+  it("preserves leading and trailing spaces in repository roots while removing only line terminators", async () => {
+    const directory = await createTempDirectory(
+      "git-repo-service-spaced-root-output-",
+    );
+    tempDirectories.push(directory);
+
+    const nestedFile = join(directory, "repo", "conflict.txt");
+    await mkdir(dirname(nestedFile), { recursive: true });
+    await writeFile(nestedFile, "content", "utf8");
+
+    const service = new GitRepositoryService({
+      runGit: vi.fn().mockResolvedValue({
+        stderr: "",
+        stdout: " /tmp/repo with spaces \r\n",
+      }),
+    });
+
+    await expect(
+      service.findRepositoryRoot(pathToFileURL(nestedFile).toString()),
+    ).resolves.toBe(" /tmp/repo with spaces ");
+  });
+
   it("throws a typed error when git rejects an unsafe repository", async () => {
     const repositoryRoot = await createTempDirectory("git-repo-service-unsafe-");
     tempDirectories.push(repositoryRoot);
@@ -182,6 +205,47 @@ describe("GitRepositoryService", () => {
         error.code === "git-command-failed" &&
         error.operation === "findRepositoryRoot",
     );
+  });
+
+  it("does not leak raw filesystem errors while confirming a missing repository marker", async () => {
+    const directory = await createTempDirectory(
+      "git-repo-service-marker-permission-denied-",
+    );
+    tempDirectories.push(directory);
+
+    const restrictedDirectory = join(directory, "restricted");
+    await mkdir(restrictedDirectory, { recursive: true });
+    await chmod(restrictedDirectory, 0o000);
+
+    const permissionError = Object.assign(new Error("permission denied"), {
+      code: "EACCES",
+    });
+
+    const service = new GitRepositoryService({
+      runGit: vi.fn().mockRejectedValue(
+        new GitCommandError(
+          ["-C", restrictedDirectory, "rev-parse", "--show-toplevel"],
+          128,
+          "fatal: not a git repository (or any of the parent directories): .git",
+        ),
+      ),
+    });
+
+    try {
+      await expect(
+        service.findRepositoryRoot(pathToFileURL(restrictedDirectory).toString()),
+      ).rejects.toSatisfy(
+        (error: unknown) =>
+          error instanceof GitServiceError &&
+          error.code === "git-command-failed" &&
+          error.operation === "findRepositoryRoot" &&
+          error.cause instanceof Error &&
+          "code" in error.cause &&
+          error.cause.code === permissionError.code,
+      );
+    } finally {
+      await chmod(restrictedDirectory, 0o700);
+    }
   });
 
   it("maps NUL-delimited unmerged records into unique repository-relative paths", async () => {

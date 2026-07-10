@@ -191,6 +191,30 @@ function mapGitCommandError(
   );
 }
 
+function mapRepositoryDiscoveryFailure(
+  uri: string,
+  candidatePath: string | undefined,
+  error: unknown,
+): GitServiceError {
+  return new GitServiceError(
+    "git-command-failed",
+    "findRepositoryRoot",
+    "Failed to discover the Git repository root",
+    {
+      args:
+        candidatePath === undefined
+          ? undefined
+          : ["-C", candidatePath, "rev-parse", "--show-toplevel"],
+      uri,
+    },
+    error,
+  );
+}
+
+function stripTrailingLineTerminators(output: string): string {
+  return output.replace(/[\r\n]+$/u, "");
+}
+
 async function resolveCandidatePath(uri: string): Promise<string> {
   const filesystemPath = uri.startsWith("file://") ? fileURLToPath(uri) : uri;
 
@@ -272,9 +296,10 @@ export class GitRepositoryService {
   }
 
   async findRepositoryRoot(uri: string): Promise<string | undefined> {
-    const candidatePath = await resolveCandidatePath(uri);
+    let candidatePath: string | undefined;
 
     try {
+      candidatePath = await resolveCandidatePath(uri);
       const result = await this.runGit([
         "-C",
         candidatePath,
@@ -282,8 +307,8 @@ export class GitRepositoryService {
         "--show-toplevel",
       ]);
 
-      const repositoryRoot = result.stdout.trim();
-      if (repositoryRoot.length === 0) {
+      const repositoryRoot = stripTrailingLineTerminators(result.stdout);
+      if (/^\s*$/u.test(repositoryRoot)) {
         throw new GitServiceError(
           "invalid-git-output",
           "findRepositoryRoot",
@@ -299,20 +324,22 @@ export class GitRepositoryService {
       }
 
       if (isGitCommandError(error)) {
-        if (await isNotRepositoryResult(candidatePath, error)) {
-          return undefined;
+        if (candidatePath === undefined) {
+          throw mapRepositoryDiscoveryFailure(uri, candidatePath, error);
+        }
+
+        try {
+          if (await isNotRepositoryResult(candidatePath, error)) {
+            return undefined;
+          }
+        } catch (discoveryError) {
+          throw mapRepositoryDiscoveryFailure(uri, candidatePath, discoveryError);
         }
 
         throw mapGitCommandError("findRepositoryRoot", error);
       }
 
-      throw new GitServiceError(
-        "git-command-failed",
-        "findRepositoryRoot",
-        "Failed to discover the Git repository root",
-        { uri },
-        error,
-      );
+      throw mapRepositoryDiscoveryFailure(uri, candidatePath, error);
     }
   }
 
