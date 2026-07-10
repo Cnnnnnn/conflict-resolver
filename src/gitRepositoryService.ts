@@ -1,0 +1,326 @@
+import { execFile } from "node:child_process";
+import { stat } from "node:fs/promises";
+import { dirname, isAbsolute, posix, relative, resolve, sep } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { promisify } from "node:util";
+
+import type { GitUnmergedFile } from "./types";
+
+const execFileAsync = promisify(execFile);
+const NOT_A_REPOSITORY_PATTERNS = [
+  "not a git repository",
+  "cannot change to",
+  "unsafe repository",
+] as const;
+
+type GitCommandResult = {
+  stdout: string;
+  stderr: string;
+};
+
+export type GitCommandRunner = (
+  args: readonly string[],
+) => Promise<GitCommandResult>;
+
+export type MergeEditorCommandRunner = (uri: string) => Promise<void>;
+
+type GitServiceErrorCode =
+  | "git-command-failed"
+  | "invalid-git-output"
+  | "unsafe-path"
+  | "merge-editor-failed";
+
+type GitServiceOperation =
+  | "findRepositoryRoot"
+  | "listUnmergedFiles"
+  | "openMergeEditor";
+
+type GitServiceErrorContext = {
+  args?: readonly string[];
+  exitCode?: number | null;
+  relativePath?: string;
+  stderr?: string;
+  uri?: string;
+};
+
+export class GitCommandError extends Error {
+  readonly args: readonly string[];
+  readonly exitCode: number | null;
+  readonly stderr: string;
+
+  constructor(
+    args: readonly string[],
+    exitCode: number | null,
+    stderr: string,
+    cause?: unknown,
+  ) {
+    super(`git ${args.join(" ")} failed`, { cause });
+    this.name = "GitCommandError";
+    this.args = [...args];
+    this.exitCode = exitCode;
+    this.stderr = stderr;
+  }
+}
+
+export class GitServiceError extends Error {
+  readonly code: GitServiceErrorCode;
+  readonly operation: GitServiceOperation;
+  readonly context: GitServiceErrorContext;
+
+  constructor(
+    code: GitServiceErrorCode,
+    operation: GitServiceOperation,
+    message: string,
+    context: GitServiceErrorContext = {},
+    cause?: unknown,
+  ) {
+    super(message, { cause });
+    this.name = "GitServiceError";
+    this.code = code;
+    this.operation = operation;
+    this.context = context;
+  }
+}
+
+function isGitCommandError(error: unknown): error is GitCommandError {
+  return error instanceof GitCommandError;
+}
+
+function createGitCommandRunner(): GitCommandRunner {
+  return async (args) => {
+    try {
+      const result = await execFileAsync("git", [...args], {
+        encoding: "utf8",
+        maxBuffer: 10 * 1024 * 1024,
+        windowsHide: true,
+      });
+
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr,
+      };
+    } catch (error) {
+      const exitCode =
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof error.code === "number"
+          ? error.code
+          : null;
+      const stderr =
+        typeof error === "object" &&
+        error !== null &&
+        "stderr" in error &&
+        typeof error.stderr === "string"
+          ? error.stderr
+          : "";
+
+      throw new GitCommandError(args, exitCode, stderr, error);
+    }
+  };
+}
+
+function normalizeRepositoryRelativePath(relativePath: string): string {
+  const normalized = posix.normalize(relativePath.replaceAll("\\", "/"));
+
+  if (
+    normalized.length === 0 ||
+    normalized === "." ||
+    normalized === ".." ||
+    normalized.startsWith("../") ||
+    posix.isAbsolute(normalized)
+  ) {
+    throw new GitServiceError(
+      "unsafe-path",
+      "listUnmergedFiles",
+      `Git reported an unsafe unmerged path: ${relativePath}`,
+      { relativePath },
+    );
+  }
+
+  return normalized;
+}
+
+function ensurePathStaysInsideRoot(
+  repositoryRoot: string,
+  relativePath: string,
+): string {
+  const resolvedRoot = resolve(repositoryRoot);
+  const absolutePath = resolve(resolvedRoot, ...relativePath.split("/"));
+  const rebased = relative(resolvedRoot, absolutePath);
+
+  if (
+    rebased === "" ||
+    rebased === ".." ||
+    rebased.startsWith(`..${sep}`) ||
+    isAbsolute(rebased)
+  ) {
+    throw new GitServiceError(
+      "unsafe-path",
+      "listUnmergedFiles",
+      `Git reported a path outside the repository root: ${relativePath}`,
+      { relativePath },
+    );
+  }
+
+  return absolutePath;
+}
+
+function mapGitCommandError(
+  operation: GitServiceOperation,
+  error: GitCommandError,
+): GitServiceError {
+  return new GitServiceError(
+    "git-command-failed",
+    operation,
+    `Git command failed during ${operation}`,
+    {
+      args: error.args,
+      exitCode: error.exitCode,
+      stderr: error.stderr,
+    },
+    error,
+  );
+}
+
+async function resolveCandidatePath(uri: string): Promise<string> {
+  const filesystemPath = uri.startsWith("file://") ? fileURLToPath(uri) : uri;
+
+  try {
+    const candidateStat = await stat(filesystemPath);
+    return candidateStat.isDirectory() ? filesystemPath : dirname(filesystemPath);
+  } catch {
+    return dirname(filesystemPath);
+  }
+}
+
+function isNotRepositoryError(error: GitCommandError): boolean {
+  const stderr = error.stderr.toLowerCase();
+  return NOT_A_REPOSITORY_PATTERNS.some((pattern) => stderr.includes(pattern));
+}
+
+export class GitRepositoryService {
+  private readonly runGit: GitCommandRunner;
+  private readonly runMergeEditorCommand: MergeEditorCommandRunner;
+
+  constructor(options?: {
+    runGit?: GitCommandRunner;
+    runMergeEditorCommand?: MergeEditorCommandRunner;
+  }) {
+    this.runGit = options?.runGit ?? createGitCommandRunner();
+    this.runMergeEditorCommand =
+      options?.runMergeEditorCommand ??
+      (async () => {
+        throw new GitServiceError(
+          "merge-editor-failed",
+          "openMergeEditor",
+          "No merge editor command runner has been configured",
+        );
+      });
+  }
+
+  async findRepositoryRoot(uri: string): Promise<string | undefined> {
+    const candidatePath = await resolveCandidatePath(uri);
+
+    try {
+      const result = await this.runGit([
+        "-C",
+        candidatePath,
+        "rev-parse",
+        "--show-toplevel",
+      ]);
+
+      const repositoryRoot = result.stdout.trim();
+      return repositoryRoot.length > 0 ? repositoryRoot : undefined;
+    } catch (error) {
+      if (isGitCommandError(error) && isNotRepositoryError(error)) {
+        return undefined;
+      }
+
+      if (isGitCommandError(error)) {
+        throw mapGitCommandError("findRepositoryRoot", error);
+      }
+
+      throw new GitServiceError(
+        "git-command-failed",
+        "findRepositoryRoot",
+        "Failed to discover the Git repository root",
+        { uri },
+        error,
+      );
+    }
+  }
+
+  async listUnmergedFiles(repositoryRoot: string): Promise<GitUnmergedFile[]> {
+    try {
+      const result = await this.runGit([
+        "-C",
+        repositoryRoot,
+        "ls-files",
+        "-u",
+        "-z",
+      ]);
+      const records = result.stdout.split("\0").filter((record) => record.length > 0);
+      const files = new Map<string, GitUnmergedFile>();
+
+      for (const record of records) {
+        const tabIndex = record.indexOf("\t");
+        if (tabIndex === -1) {
+          throw new GitServiceError(
+            "invalid-git-output",
+            "listUnmergedFiles",
+            "Git ls-files output did not contain a path separator",
+          );
+        }
+
+        const relativePath = normalizeRepositoryRelativePath(record.slice(tabIndex + 1));
+        if (files.has(relativePath)) {
+          continue;
+        }
+
+        const absolutePath = ensurePathStaysInsideRoot(repositoryRoot, relativePath);
+        files.set(relativePath, {
+          repositoryRoot,
+          relativePath,
+          uri: pathToFileURL(absolutePath).toString(),
+        });
+      }
+
+      return [...files.values()];
+    } catch (error) {
+      if (error instanceof GitServiceError) {
+        throw error;
+      }
+
+      if (isGitCommandError(error)) {
+        throw mapGitCommandError("listUnmergedFiles", error);
+      }
+
+      throw new GitServiceError(
+        "git-command-failed",
+        "listUnmergedFiles",
+        "Failed to list unmerged Git files",
+        { args: ["-C", repositoryRoot, "ls-files", "-u", "-z"] },
+        error,
+      );
+    }
+  }
+
+  async openMergeEditor(uri: string): Promise<void> {
+    try {
+      await this.runMergeEditorCommand(uri);
+    } catch (error) {
+      if (error instanceof GitServiceError) {
+        throw error;
+      }
+
+      throw new GitServiceError(
+        "merge-editor-failed",
+        "openMergeEditor",
+        "Failed to open the merge editor",
+        { uri },
+        error,
+      );
+    }
+  }
+}
