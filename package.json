@@ -3,7 +3,7 @@
   "displayName": "Conflict Resolver",
   "description": "VS Code and Cursor extension for locating and navigating Git merge conflicts.",
   "icon": "resources/icon.png",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "shienLiang",
   "license": "MIT",
   "author": {

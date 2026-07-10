@@ -9,13 +9,24 @@ import type { ConflictStoreDocumentLoader } from "./conflictStore";
 import {
   CONFLICT_TREE_FETCH_MR_TARGET_COMMAND,
   CONFLICT_TREE_GO_TO_COMMAND,
+  CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
+  CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
+  CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND,
   CONFLICT_TREE_OPEN_MR_COMMAND,
   CONFLICT_TREE_OPEN_MR_CONFLICTS_COMMAND,
   CONFLICT_TREE_PREVIEW_MR_MERGE_COMMAND,
   ConflictTreeProvider,
+  type ConflictTreeCommandArguments,
   type ConflictTreeMrActionArguments,
   type ConflictTreeOpenMrArguments,
 } from "./conflictTreeProvider";
+import {
+  EMPTY_CONFLICT_WORK_STATE,
+  formatLocatedClearedNotification,
+  shouldNotifyLocatedConflictsCleared,
+  updateConflictWorkState,
+} from "./conflictCompletion";
+import { applyConflictResolution } from "./conflictResolution";
 import { GitRepositoryService } from "./gitRepositoryService";
 import {
   buildScmEditorSlotContext,
@@ -37,6 +48,7 @@ import {
   previewMrMerge,
 } from "./mergeRequestActions";
 import { formatMergeProgressLabel, getMergeProgress } from "./mergeProgress";
+import type { ConflictBlock } from "./types";
 import { ConflictStatusBar } from "./statusBar";
 
 function createDocumentLoader(): ConflictStoreDocumentLoader {
@@ -299,6 +311,37 @@ function createMergeRequestConfig(): {
   };
 }
 
+function getConflictFileText(uri: string): string | undefined {
+  const key = toConflictFileKey(uri);
+  for (const document of vscode.workspace.textDocuments) {
+    if (toConflictFileKey(document.uri.fsPath) === key) {
+      return document.getText();
+    }
+  }
+
+  return undefined;
+}
+
+async function revealConflictInEditor(uri: string, conflict: ConflictBlock): Promise<void> {
+  const editor = vscode.window.activeTextEditor;
+  if (editor?.document.uri.toString() !== uri) {
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+    await vscode.window.showTextDocument(document);
+  }
+
+  const activeEditor = vscode.window.activeTextEditor;
+  if (activeEditor === undefined) {
+    return;
+  }
+
+  const position = new vscode.Position(conflict.startLine, 0);
+  activeEditor.selection = new vscode.Selection(position, position);
+  await activeEditor.revealRange(
+    new vscode.Range(position, position),
+    vscode.TextEditorRevealType.InCenter,
+  );
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   const git = new GitRepositoryService({
     runMergeEditorCommand: async (uri) => {
@@ -307,8 +350,19 @@ export function activate(context: vscode.ExtensionContext): void {
   });
   const store = new ConflictStore({ documents: createDocumentLoader(), git });
   const remoteMr = new MergeRequestConflictService({ config: createMergeRequestConfig() });
-  const tree = new ConflictTreeProvider(store, remoteMr, (uri) => vscode.Uri.parse(uri));
+  const tree = new ConflictTreeProvider(
+    store,
+    remoteMr,
+    (uri) => vscode.Uri.parse(uri),
+    {
+      getFileText: getConflictFileText,
+      createThemeIcon: (id) => new vscode.ThemeIcon(id),
+    },
+  );
   const treeView = vscode.window.createTreeView("conflictResolver.tree", { treeDataProvider: tree });
+  let conflictWorkState = EMPTY_CONFLICT_WORK_STATE;
+  let locatedClearedNotified = false;
+  let previousSnapshot = store.getSnapshot();
   const startDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
     overviewRulerColor: new vscode.ThemeColor("editorWarning.foreground"),
@@ -324,18 +378,7 @@ export function activate(context: vscode.ExtensionContext): void {
       const editor = vscode.window.activeTextEditor;
       return editor === undefined ? undefined : { uri: editor.document.uri.toString(), line: editor.selection.active.line };
     },
-    revealConflict: async (uri, conflict) => {
-      const editor = vscode.window.activeTextEditor;
-      if (editor?.document.uri.toString() !== uri) {
-        const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
-        await vscode.window.showTextDocument(document);
-      }
-      const activeEditor = vscode.window.activeTextEditor;
-      if (activeEditor === undefined) return;
-      const position = new vscode.Position(conflict.startLine, 0);
-      activeEditor.selection = new vscode.Selection(position, position);
-      await activeEditor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-    },
+    revealConflict: async (uri, conflict) => revealConflictInEditor(uri, conflict),
     openMergeEditor: (uri) => git.openMergeEditor(uri),
     showMergeEditorFallback: async (uri, error) => {
       await vscode.window.showWarningMessage(`无法打开 Merge Editor：${uri}。${error instanceof Error ? error.message : String(error)}`);
@@ -406,10 +449,33 @@ export function activate(context: vscode.ExtensionContext): void {
       count > 0
         ? { value: count, tooltip: `${count} 个冲突文件` }
         : undefined;
-    treeView.message = (() => {
-      const label = formatMergeProgressLabel(getMergeProgress(snapshot));
-      return label === "无待处理冲突" ? undefined : label;
-    })();
+    const completionMessage = tree.getCompletionMessage();
+    treeView.message =
+      completionMessage ??
+      (() => {
+        const label = formatMergeProgressLabel(getMergeProgress(snapshot));
+        return label === "无待处理冲突" ? undefined : label;
+      })();
+  };
+
+  const handleSnapshotTransition = (snapshot: ReturnType<typeof store.getSnapshot>): void => {
+    if (
+      shouldNotifyLocatedConflictsCleared(previousSnapshot, snapshot) &&
+      !locatedClearedNotified
+    ) {
+      locatedClearedNotified = true;
+      void vscode.window.showInformationMessage(
+        formatLocatedClearedNotification(snapshot),
+      );
+    }
+
+    if (snapshot.locatedCount > 0) {
+      locatedClearedNotified = false;
+    }
+
+    conflictWorkState = updateConflictWorkState(conflictWorkState, snapshot);
+    tree.setWorkState(conflictWorkState);
+    previousSnapshot = snapshot;
   };
 
   registerGitStateWatchers(context, () => store.scheduleImmediateRefresh("git-state"));
@@ -417,6 +483,7 @@ export function activate(context: vscode.ExtensionContext): void {
   registerScmConflictMenus(context, store, navigation, git);
 
   const refreshConflictUi = async (snapshot: ReturnType<typeof store.getSnapshot>): Promise<void> => {
+    handleSnapshotTransition(snapshot);
     decorations.update(snapshot);
     fileDecorations.update(snapshot);
     updateConflictBadges(snapshot);
@@ -453,7 +520,51 @@ export function activate(context: vscode.ExtensionContext): void {
         };
       },
     }),
-    vscode.commands.registerCommand(CONFLICT_TREE_GO_TO_COMMAND, (args: { uri: string; conflictId: string }) => navigation.goTo(args.uri, args.conflictId)),
+    vscode.commands.registerCommand(CONFLICT_TREE_GO_TO_COMMAND, (args: ConflictTreeCommandArguments) => navigation.goTo(args.uri, args.conflictId)),
+    vscode.commands.registerCommand(
+      CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
+      async (args: ConflictTreeCommandArguments) => {
+        const ok = await applyConflictResolution(
+          store.getSnapshot(),
+          {
+            revealConflict: revealConflictInEditor,
+            runCommand: async (command) => {
+              await vscode.commands.executeCommand(command);
+            },
+          },
+          args.uri,
+          args.conflictId,
+          "current",
+        );
+        if (!ok) {
+          await vscode.window.showWarningMessage("未找到可处理的冲突");
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
+      async (args: ConflictTreeCommandArguments) => {
+        const ok = await applyConflictResolution(
+          store.getSnapshot(),
+          {
+            revealConflict: revealConflictInEditor,
+            runCommand: async (command) => {
+              await vscode.commands.executeCommand(command);
+            },
+          },
+          args.uri,
+          args.conflictId,
+          "incoming",
+        );
+        if (!ok) {
+          await vscode.window.showWarningMessage("未找到可处理的冲突");
+        }
+      },
+    ),
+    vscode.commands.registerCommand(
+      CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND,
+      async (args: { uri: string }) => git.openMergeEditor(args.uri),
+    ),
     vscode.commands.registerCommand(CONFLICT_TREE_OPEN_MR_COMMAND, (args: ConflictTreeOpenMrArguments) => vscode.env.openExternal(vscode.Uri.parse(args.webUrl))),
     vscode.commands.registerCommand(
       CONFLICT_TREE_FETCH_MR_TARGET_COMMAND,

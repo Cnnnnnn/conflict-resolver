@@ -1,10 +1,17 @@
 import type * as vscode from "vscode";
 
+import {
+  formatCompletionLabel,
+  getCompletionKind,
+  type ConflictWorkState,
+  EMPTY_CONFLICT_WORK_STATE,
+} from "./conflictCompletion";
 import type {
   ConflictStore,
   ConflictStoreChangeListener,
   ConflictStoreDisposable,
 } from "./conflictStore";
+import { formatConflictPreviewTooltip } from "./conflictPreview";
 import type { MergeRequestConflictService } from "./mergeRequestConflictService";
 import {
   formatGitOnlyConflictLabel,
@@ -24,6 +31,20 @@ const COLLAPSE_COLLAPSED = 1;
 const COLLAPSE_EXPANDED = 2;
 
 export const CONFLICT_TREE_GO_TO_COMMAND = "conflictResolver.goToConflict";
+export const CONFLICT_TREE_ACCEPT_CURRENT_COMMAND =
+  "conflictResolver.acceptCurrentConflict";
+export const CONFLICT_TREE_ACCEPT_INCOMING_COMMAND =
+  "conflictResolver.acceptIncomingConflict";
+export const CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND =
+  "conflictResolver.openMergeEditorForFile";
+
+type ConflictTreeItemButton = {
+  iconPath?: vscode.ThemeIcon;
+  tooltip: string;
+  command: vscode.Command;
+};
+
+type ThemeIconFactory = (id: string) => vscode.ThemeIcon;
 export const CONFLICT_TREE_OPEN_MR_COMMAND = "conflictResolver.openMergeRequest";
 export const CONFLICT_TREE_FETCH_MR_TARGET_COMMAND =
   "conflictResolver.fetchMrTargetBranch";
@@ -60,9 +81,11 @@ type ConflictTreeItemBase = vscode.TreeItem & {
     | "remoteMr"
     | "remoteMrAction"
     | "remoteStatus"
-    | "progress";
+    | "progress"
+    | "completion";
   collapsibleState: number;
   contextValue: string;
+  buttons?: ConflictTreeItemButton[];
 };
 
 export type ConflictTreeGroupItem = ConflictTreeItemBase & {
@@ -112,6 +135,11 @@ export type ConflictTreeProgressItem = ConflictTreeItemBase & {
   label: string;
 };
 
+export type ConflictTreeCompletionItem = ConflictTreeItemBase & {
+  kind: "completion";
+  label: string;
+};
+
 export type ConflictTreeRemoteStatusItem = ConflictTreeItemBase & {
   kind: "remoteStatus";
   label: string;
@@ -124,7 +152,69 @@ export type ConflictTreeItem =
   | ConflictTreeRemoteMrItem
   | ConflictTreeRemoteMrActionItem
   | ConflictTreeProgressItem
+  | ConflictTreeCompletionItem
   | ConflictTreeRemoteStatusItem;
+
+export type ConflictTreeTextProvider = (uri: string) => string | undefined;
+
+type ConflictTreeProviderOptions = {
+  getFileText?: ConflictTreeTextProvider;
+  createThemeIcon?: ThemeIconFactory;
+};
+
+function createConflictCommandArguments(
+  uri: string,
+  conflictId: string,
+): ConflictTreeCommandArguments {
+  return { uri, conflictId };
+}
+
+function createAcceptCurrentButton(
+  uri: string,
+  conflictId: string,
+  createThemeIcon?: ThemeIconFactory,
+): ConflictTreeItemButton {
+  return {
+    iconPath: createThemeIcon?.("arrow-left"),
+    tooltip: "采用当前",
+    command: {
+      command: CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
+      title: "采用当前",
+      arguments: [createConflictCommandArguments(uri, conflictId)],
+    },
+  };
+}
+
+function createAcceptIncomingButton(
+  uri: string,
+  conflictId: string,
+  createThemeIcon?: ThemeIconFactory,
+): ConflictTreeItemButton {
+  return {
+    iconPath: createThemeIcon?.("arrow-right"),
+    tooltip: "采用传入",
+    command: {
+      command: CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
+      title: "采用传入",
+      arguments: [createConflictCommandArguments(uri, conflictId)],
+    },
+  };
+}
+
+function createOpenMergeEditorButton(
+  uri: string,
+  createThemeIcon?: ThemeIconFactory,
+): ConflictTreeItemButton {
+  return {
+    iconPath: createThemeIcon?.("git-merge"),
+    tooltip: "打开 Merge Editor",
+    command: {
+      command: CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND,
+      title: "打开 Merge Editor",
+      arguments: [{ uri }],
+    },
+  };
+}
 
 type ConflictTreeStore = Pick<ConflictStore, "getSnapshot" | "onDidChange">;
 type RemoteMrStore = Pick<MergeRequestConflictService, "getSnapshot" | "onDidChange">;
@@ -233,10 +323,10 @@ function createGroupItem(
 function createFileItem(
   file: ConflictFile,
   groupKey: "located" | "gitOnly",
+  createThemeIcon?: ThemeIconFactory,
 ): ConflictTreeFileItem {
   const conflictCount = file.locatedConflicts.length;
-
-  return {
+  const item: ConflictTreeFileItem = {
     id: `file:${groupKey}:${file.uri}`,
     kind: "file",
     groupKey,
@@ -259,13 +349,22 @@ function createFileItem(
     collapsibleState:
       groupKey === "located" ? COLLAPSE_COLLAPSED : COLLAPSE_NONE,
   };
+
+  if (groupKey === "gitOnly") {
+    item.buttons = [createOpenMergeEditorButton(file.uri, createThemeIcon)];
+  }
+
+  return item;
 }
 
 function createConflictItem(
   file: ConflictFile,
   conflict: ConflictBlock,
   conflictIndex: number,
+  fileText: string | undefined,
+  createThemeIcon?: ThemeIconFactory,
 ): ConflictTreeConflictItem {
+  const args = createConflictCommandArguments(file.uri, conflict.id);
   return {
     id: `conflict:${file.uri}:${conflict.id}`,
     kind: "conflict",
@@ -277,17 +376,16 @@ function createConflictItem(
     startLine: conflict.startLine,
     endLine: conflict.endLine,
     description: `第 ${conflict.startLine + 1} 行`,
-    tooltip: `${file.relativePath}\n第 ${conflict.startLine + 1} 行到第 ${conflict.endLine + 1} 行`,
+    tooltip: formatConflictPreviewTooltip(file.relativePath, conflict, fileText),
     command: {
       command: CONFLICT_TREE_GO_TO_COMMAND,
       title: "Go to conflict",
-      arguments: [
-        {
-          uri: file.uri,
-          conflictId: conflict.id,
-        } satisfies ConflictTreeCommandArguments,
-      ],
+      arguments: [args],
     },
+    buttons: [
+      createAcceptCurrentButton(file.uri, conflict.id, createThemeIcon),
+      createAcceptIncomingButton(file.uri, conflict.id, createThemeIcon),
+    ],
     collapsibleState: COLLAPSE_NONE,
   };
 }
@@ -390,6 +488,21 @@ function createRemoteMrActionItems(
   return items;
 }
 
+function createCompletionItem(
+  label: string,
+  createThemeIcon?: ThemeIconFactory,
+): ConflictTreeCompletionItem {
+  return {
+    id: "completion:summary",
+    kind: "completion",
+    contextValue: "conflictTreeCompletion",
+    label,
+    tooltip: label,
+    iconPath: createThemeIcon?.("pass-filled"),
+    collapsibleState: COLLAPSE_NONE,
+  };
+}
+
 function createProgressItem(snapshot: ConflictSnapshot): ConflictTreeProgressItem | undefined {
   const progress = getMergeProgress(snapshot);
   const label = formatMergeProgressLabel(progress);
@@ -454,11 +567,14 @@ export class ConflictTreeProvider
 {
   private snapshot: ConflictSnapshot;
   private remoteSnapshot: RemoteMergeRequestSnapshot;
+  private workState: ConflictWorkState = EMPTY_CONFLICT_WORK_STATE;
   private readonly changeEmitter = new SimpleEmitter<
     ConflictTreeItem | undefined
   >();
   private readonly storeSubscription: ConflictStoreDisposable;
   private readonly remoteSubscription?: ConflictStoreDisposable;
+  private readonly getFileText?: ConflictTreeTextProvider;
+  private readonly createThemeIcon?: ThemeIconFactory;
 
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
@@ -466,7 +582,10 @@ export class ConflictTreeProvider
     private readonly store: ConflictTreeStore,
     remoteStore?: RemoteMrStore,
     private readonly parseUri?: (uri: string) => vscode.Uri,
+    options?: ConflictTreeProviderOptions,
   ) {
+    this.getFileText = options?.getFileText;
+    this.createThemeIcon = options?.createThemeIcon;
     this.snapshot = store.getSnapshot();
     this.remoteSnapshot = remoteStore?.getSnapshot() ?? {
       repositoryRoot: "",
@@ -485,6 +604,15 @@ export class ConflictTreeProvider
     this.storeSubscription.dispose();
     this.remoteSubscription?.dispose();
     this.changeEmitter.dispose();
+  }
+
+  setWorkState(state: ConflictWorkState): void {
+    this.workState = state;
+    this.changeEmitter.fire(undefined);
+  }
+
+  getCompletionMessage(): string | undefined {
+    return formatCompletionLabel(getCompletionKind(this.snapshot, this.workState), this.snapshot);
   }
 
   getTreeItem(element: ConflictTreeItem): ConflictTreeItem {
@@ -508,9 +636,17 @@ export class ConflictTreeProvider
       );
 
       const items: ConflictTreeItem[] = [];
-      const progressItem = createProgressItem(this.snapshot);
-      if (progressItem !== undefined) {
-        items.push(progressItem);
+      const completionLabel = formatCompletionLabel(
+        getCompletionKind(this.snapshot, this.workState),
+        this.snapshot,
+      );
+      if (completionLabel !== undefined) {
+        items.push(createCompletionItem(completionLabel, this.createThemeIcon));
+      } else {
+        const progressItem = createProgressItem(this.snapshot);
+        if (progressItem !== undefined) {
+          items.push(progressItem);
+        }
       }
 
       const groups: ConflictTreeGroupItem[] = [
@@ -547,7 +683,7 @@ export class ConflictTreeProvider
             : [];
 
       return files.map((file) =>
-        createFileItem(file, element.groupKey as "located" | "gitOnly"),
+        createFileItem(file, element.groupKey as "located" | "gitOnly", this.createThemeIcon),
       );
     }
 
@@ -559,7 +695,15 @@ export class ConflictTreeProvider
 
       return [...file.locatedConflicts]
         .sort(compareConflicts)
-        .map((conflict, index) => createConflictItem(file, conflict, index + 1));
+        .map((conflict, index) =>
+          createConflictItem(
+            file,
+            conflict,
+            index + 1,
+            this.getFileText?.(file.uri),
+            this.createThemeIcon,
+          ),
+        );
     }
 
     return [];

@@ -3,9 +3,12 @@ import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
+  CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
   CONFLICT_TREE_GO_TO_COMMAND,
   CONFLICT_TREE_OPEN_MR_COMMAND,
   ConflictTreeProvider,
+  type ConflictTreeConflictItem,
   type ConflictTreeFileItem,
   type ConflictTreeGroupItem,
   type ConflictTreeRemoteMrItem,
@@ -211,6 +214,75 @@ describe("ConflictTreeProvider", () => {
         },
       ],
     });
+    const firstConflict = conflicts[0] as ConflictTreeConflictItem;
+    expect(firstConflict.buttons).toHaveLength(2);
+    expect(firstConflict.buttons?.[0]?.command).toMatchObject({
+      command: CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
+      arguments: [{ uri: zFile.uri, conflictId: "z-early" }],
+    });
+    expect(firstConflict.buttons?.[1]?.command).toMatchObject({
+      command: CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
+      arguments: [{ uri: zFile.uri, conflictId: "z-early" }],
+    });
+  });
+
+  it("shows preview tooltip and completion state", async () => {
+    const store = new FakeConflictStore(
+      createSnapshot(
+        [
+          {
+            uri: toUri("/repo/a.ts"),
+            repositoryRoot: "/repo",
+            relativePath: "a.ts",
+            gitUnmerged: true,
+            locatedConflicts: [],
+          },
+        ],
+        { gitOnlyCount: 0, locatedCount: 0 },
+      ),
+    );
+    const provider = new ConflictTreeProvider(store, undefined, undefined, {
+      getFileText: () => "<<<<<<<\nours\n=======\ntheirs\n>>>>>>>",
+    });
+    provider.setWorkState({ hadLocatedConflicts: true, hadUnmergedFiles: true });
+
+    const rootItems = await provider.getChildren();
+    expect(rootItems[0].label).toBe("✓ 冲突标记已处理 · 剩余 1 个文件待 git add");
+    expect(provider.getCompletionMessage()).toBe(
+      "✓ 冲突标记已处理 · 剩余 1 个文件待 git add",
+    );
+
+    const activeStore = new FakeConflictStore(
+      createSnapshot([
+        {
+          uri: toUri("/repo/a.ts"),
+          repositoryRoot: "/repo",
+          relativePath: "a.ts",
+          gitUnmerged: true,
+          locatedConflicts: [
+            {
+              id: "a",
+              startLine: 0,
+              separatorLine: 2,
+              endLine: 4,
+              oursRange: { startLine: 1, endLine: 1 },
+              theirsRange: { startLine: 3, endLine: 3 },
+            },
+          ],
+        },
+      ]),
+    );
+    const activeProvider = new ConflictTreeProvider(activeStore, undefined, undefined, {
+      getFileText: () => "<<<<<<<\nours\n=======\ntheirs\n>>>>>>>",
+    });
+    const activeRootItems = await activeProvider.getChildren();
+    const locatedGroup = activeRootItems.find((item) =>
+      String(item.label).startsWith("可定位冲突"),
+    ) as ConflictTreeGroupItem;
+    const [file] = await activeProvider.getChildren(locatedGroup);
+    const [conflictItem] = await activeProvider.getChildren(file as ConflictTreeFileItem);
+    expect(String(conflictItem.tooltip)).toContain("ours");
+    expect(String(conflictItem.tooltip)).toContain("theirs");
   });
 
   it("refreshes the view when the store publishes a new snapshot", async () => {
