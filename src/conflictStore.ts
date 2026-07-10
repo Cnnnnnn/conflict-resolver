@@ -400,15 +400,6 @@ export class ConflictStore {
     key: string,
   ): Promise<void> {
     const text = await document.getText();
-    if (!hasLocatedConflictCandidate(text)) {
-      return;
-    }
-
-    const parsed = this.parseConflicts(text);
-    if (parsed.blocks.length === 0 && parsed.error === undefined) {
-      return;
-    }
-
     const existing = files.get(key);
     const resolvedRepositoryRoot = repositoryRoot ?? existing?.file.repositoryRoot;
     if (resolvedRepositoryRoot === undefined) {
@@ -419,6 +410,43 @@ export class ConflictStore {
       existing?.file.relativePath ??
       toRepositoryRelativePath(resolvedRepositoryRoot, document.uri);
     if (relativePath === undefined) {
+      return;
+    }
+
+    if (!hasLocatedConflictCandidate(text)) {
+      if (existing === undefined) {
+        return;
+      }
+
+      files.set(key, {
+        file: {
+          uri: document.uri,
+          repositoryRoot: resolvedRepositoryRoot,
+          relativePath,
+          locatedConflicts: [],
+          gitUnmerged: existing.file.gitUnmerged,
+          parseError: undefined,
+        },
+      });
+      return;
+    }
+
+    const parsed = this.parseConflicts(text);
+    if (parsed.blocks.length === 0 && parsed.error === undefined) {
+      if (existing === undefined) {
+        return;
+      }
+
+      files.set(key, {
+        file: {
+          uri: document.uri,
+          repositoryRoot: resolvedRepositoryRoot,
+          relativePath,
+          locatedConflicts: [],
+          gitUnmerged: existing.file.gitUnmerged,
+          parseError: undefined,
+        },
+      });
       return;
     }
 

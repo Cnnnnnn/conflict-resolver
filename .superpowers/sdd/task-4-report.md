@@ -116,3 +116,57 @@ Tests  30 passed (30)
 Start at  14:56:49
 Duration  776ms (transform 234ms, setup 0ms, collect 319ms, tests 409ms, environment 0ms, prepare 261ms)
 ```
+
+## Remaining Review Fixes
+
+- Open documents now remain authoritative for the same URI even after the user resolves markers only in the unsaved editor buffer. When Git/disk parsing still finds marker blocks for that URI, the store clears `locatedConflicts` and `parseError` from the snapshot entry while preserving `gitUnmerged: true`.
+- Focused store coverage now includes CRLF conflict text, Unicode repository-relative paths, nested and distinct repository-root selection, and normalized worktree-style repository roots with deterministic fakes only.
+
+## Remaining Review Verification Evidence
+
+Focused Task 4 suite after final review fixes:
+
+- Command: `CI=1 npm run test:unit -- src/test/conflictStore.test.ts`
+- Result: PASS
+
+```text
+> conflict-resolver@0.0.1 test:unit
+> vitest run src/test/conflictStore.test.ts
+
+RUN  v3.2.4 /Users/shien.liang/Documents/Codex/2026-07-10/xian
+
+✓ src/test/conflictStore.test.ts (12 tests) 10ms
+
+Test Files  1 passed (1)
+Tests  12 passed (12)
+Start at  15:06:42
+Duration  408ms (transform 101ms, setup 0ms, collect 104ms, tests 10ms, environment 0ms, prepare 123ms)
+```
+
+Full gate after final review fixes:
+
+- Command: `npm run check`
+- Result: PASS
+
+```text
+> conflict-resolver@0.0.1 check
+> npm run compile && npm run test:unit
+
+> conflict-resolver@0.0.1 compile
+> tsc -p ./
+
+> conflict-resolver@0.0.1 test:unit
+> vitest run
+
+RUN  v3.2.4 /Users/shien.liang/Documents/Codex/2026-07-10/xian
+
+✓ src/test/conflictParser.test.ts (9 tests) 4ms
+✓ src/test/conflictStore.test.ts (12 tests) 15ms
+✓ src/test/gitRepositoryService.test.ts (14 tests) 450ms
+✓ GitRepositoryService > detects a real conflicted file in a temporary repository  358ms
+
+Test Files  3 passed (3)
+Tests  35 passed (35)
+Start at  15:06:50
+Duration  917ms (transform 329ms, setup 0ms, collect 477ms, tests 468ms, environment 0ms, prepare 297ms)
+```

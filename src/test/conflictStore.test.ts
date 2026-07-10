@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +7,18 @@ import { ConflictStore, type ConflictStoreDocument, type ConflictStoreDocumentLo
 import type { GitUnmergedFile } from "../types";
 
 const REPOSITORY_ROOT = "/repo";
+const NESTED_REPOSITORY_ROOT = "/repo/packages/nested";
+const OTHER_REPOSITORY_ROOT = "/repo-other";
+const WORKTREE_REPOSITORY_ROOT = "/workspace/repo-worktree";
+
+type FakeDocumentEntry = {
+  loadedText: string;
+  openText: string;
+};
+
+function toUri(filePath: string): string {
+  return pathToFileURL(filePath).toString();
+}
 
 class FakeDocument implements ConflictStoreDocument {
   readonly uri: string;
@@ -24,17 +37,32 @@ class FakeDocument implements ConflictStoreDocument {
 class FakeDocumentLoader implements ConflictStoreDocumentLoader {
   private readonly repositoryRoots: string[];
   private readonly loadErrors = new Map<string, Error>();
-  private readonly texts = new Map<string, string>();
+  private readonly documents = new Map<string, FakeDocumentEntry>();
   private readonly openUris = new Set<string>();
 
   constructor(repositoryRoots: readonly string[] = []) {
     this.repositoryRoots = [...repositoryRoots];
   }
 
-  setDocument(relativePath: string, text: string, options?: { open?: boolean }): void {
-    const uri = pathToFileURL(`${REPOSITORY_ROOT}/${relativePath}`).toString();
+  setDocument(
+    relativePath: string,
+    text: string,
+    options?: { open?: boolean; openText?: string },
+  ): void {
+    this.setDocumentAtPath(`${REPOSITORY_ROOT}/${relativePath}`, text, options);
+  }
+
+  setDocumentAtPath(
+    filePath: string,
+    text: string,
+    options?: { open?: boolean; openText?: string },
+  ): void {
+    const uri = toUri(filePath);
     this.loadErrors.delete(uri);
-    this.texts.set(uri, text);
+    this.documents.set(uri, {
+      loadedText: text,
+      openText: options?.openText ?? text,
+    });
 
     if (options?.open ?? true) {
       this.openUris.add(uri);
@@ -45,21 +73,31 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
   }
 
   deleteDocument(relativePath: string): void {
-    const uri = pathToFileURL(`${REPOSITORY_ROOT}/${relativePath}`).toString();
+    this.deleteDocumentAtPath(`${REPOSITORY_ROOT}/${relativePath}`);
+  }
+
+  deleteDocumentAtPath(filePath: string): void {
+    const uri = toUri(filePath);
     this.loadErrors.delete(uri);
-    this.texts.delete(uri);
+    this.documents.delete(uri);
     this.openUris.delete(uri);
   }
 
   setLoadError(relativePath: string, error: Error): void {
-    const uri = pathToFileURL(`${REPOSITORY_ROOT}/${relativePath}`).toString();
+    this.setLoadErrorAtPath(`${REPOSITORY_ROOT}/${relativePath}`, error);
+  }
+
+  setLoadErrorAtPath(filePath: string, error: Error): void {
+    const uri = toUri(filePath);
     this.loadErrors.set(uri, error);
-    this.texts.delete(uri);
+    this.documents.delete(uri);
     this.openUris.delete(uri);
   }
 
   async getOpenDocuments(): Promise<ConflictStoreDocument[]> {
-    return [...this.openUris].map((uri) => new FakeDocument(uri, this.texts.get(uri) ?? ""));
+    return [...this.openUris].map(
+      (uri) => new FakeDocument(uri, this.documents.get(uri)?.openText ?? ""),
+    );
   }
 
   async loadDocument(uri: string): Promise<ConflictStoreDocument | undefined> {
@@ -68,12 +106,12 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
       throw error;
     }
 
-    const text = this.texts.get(uri);
-    if (text === undefined) {
+    const document = this.documents.get(uri);
+    if (document === undefined) {
       return undefined;
     }
 
-    return new FakeDocument(uri, text);
+    return new FakeDocument(uri, document.loadedText);
   }
 
   async getRepositoryRoots(): Promise<string[]> {
@@ -84,25 +122,44 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
 class FakeGitRepositoryService {
   readonly findRepositoryRoot = vi.fn(async (uri: string) => {
     const absolutePath = new URL(uri).pathname;
-    if (!absolutePath.startsWith(REPOSITORY_ROOT)) {
+    const matchingRoots = [...this.knownRepositoryRoots].filter(
+      (repositoryRoot) =>
+        absolutePath === repositoryRoot ||
+        absolutePath.startsWith(`${repositoryRoot}/`),
+    );
+    if (matchingRoots.length === 0) {
       return undefined;
     }
 
-    return REPOSITORY_ROOT;
+    matchingRoots.sort((left, right) => right.length - left.length);
+    return matchingRoots[0];
   });
 
-  readonly listUnmergedFiles = vi.fn(async (_repositoryRoot: string) => {
-    return this.unmergedFiles;
+  readonly listUnmergedFiles = vi.fn(async (repositoryRoot: string) => {
+    return this.unmergedFilesByRoot.get(resolve(repositoryRoot)) ?? [];
   });
 
-  private unmergedFiles: GitUnmergedFile[] = [];
+  private readonly knownRepositoryRoots = new Set([resolve(REPOSITORY_ROOT)]);
+  private readonly unmergedFilesByRoot = new Map<string, GitUnmergedFile[]>();
 
   setUnmerged(relativePaths: readonly string[]): void {
-    this.unmergedFiles = relativePaths.map((relativePath) => ({
-      repositoryRoot: REPOSITORY_ROOT,
-      relativePath,
-      uri: pathToFileURL(`${REPOSITORY_ROOT}/${relativePath}`).toString(),
-    }));
+    this.setUnmergedForRoot(REPOSITORY_ROOT, relativePaths);
+  }
+
+  setUnmergedForRoot(
+    repositoryRoot: string,
+    relativePaths: readonly string[],
+  ): void {
+    const normalizedRoot = resolve(repositoryRoot);
+    this.knownRepositoryRoots.add(normalizedRoot);
+    this.unmergedFilesByRoot.set(
+      normalizedRoot,
+      relativePaths.map((relativePath) => ({
+        repositoryRoot: normalizedRoot,
+        relativePath,
+        uri: toUri(`${normalizedRoot}/${relativePath}`),
+      })),
+    );
   }
 }
 
@@ -179,6 +236,35 @@ describe("ConflictStore", () => {
     expect(store.getSnapshot().files).toHaveLength(0);
   });
 
+  it("treats the open document as authoritative when its unsaved buffer is resolved", async () => {
+    const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
+    fakeDocuments.setDocument("src/a.ts", markerText("disk"), {
+      open: true,
+      openText: "resolved in editor",
+    });
+
+    const fakeGit = new FakeGitRepositoryService();
+    fakeGit.setUnmerged(["src/a.ts"]);
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    const snapshot = await store.refresh();
+
+    expect(snapshot.locatedCount).toBe(0);
+    expect(snapshot.gitOnlyCount).toBe(1);
+    expect(snapshot.files).toEqual([
+      expect.objectContaining({
+        relativePath: "src/a.ts",
+        gitUnmerged: true,
+        locatedConflicts: [],
+        parseError: undefined,
+      }),
+    ]);
+  });
+
   it("merges git and open-document scans by canonical file URI", async () => {
     const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
     fakeDocuments.setDocument("folder with spaces/conflict file.ts", markerText("shared"));
@@ -221,6 +307,114 @@ describe("ConflictStore", () => {
       expect.objectContaining({
         relativePath: "notes.md",
         gitUnmerged: false,
+      }),
+    ]);
+  });
+
+  it("parses CRLF conflict text from the open document", async () => {
+    const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
+    fakeDocuments.setDocument("windows/conflict.ts", markerText("crlf").replaceAll("\n", "\r\n"));
+
+    const fakeGit = new FakeGitRepositoryService();
+    fakeGit.setUnmerged([]);
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    const snapshot = await store.refresh();
+
+    expect(snapshot.locatedCount).toBe(1);
+    expect(snapshot.files).toEqual([
+      expect.objectContaining({
+        relativePath: "windows/conflict.ts",
+        locatedConflicts: [expect.objectContaining({ startLine: 0, endLine: 4 })],
+      }),
+    ]);
+  });
+
+  it("merges unicode paths without losing the repository-relative filename", async () => {
+    const fakeDocuments = new FakeDocumentLoader([REPOSITORY_ROOT]);
+    fakeDocuments.setDocument("unicøde/冲突 文件.ts", markerText("unicode"));
+
+    const fakeGit = new FakeGitRepositoryService();
+    fakeGit.setUnmerged(["unicøde/冲突 文件.ts"]);
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    const snapshot = await store.refresh();
+
+    expect(snapshot.files).toEqual([
+      expect.objectContaining({
+        relativePath: "unicøde/冲突 文件.ts",
+        repositoryRoot: resolve(REPOSITORY_ROOT),
+        gitUnmerged: true,
+      }),
+    ]);
+  });
+
+  it("selects the containing repository root for nested and distinct roots", async () => {
+    const fakeDocuments = new FakeDocumentLoader([
+      REPOSITORY_ROOT,
+      NESTED_REPOSITORY_ROOT,
+      OTHER_REPOSITORY_ROOT,
+    ]);
+    fakeDocuments.setDocumentAtPath(
+      `${NESTED_REPOSITORY_ROOT}/src/nested.ts`,
+      markerText("nested"),
+    );
+    fakeDocuments.setDocumentAtPath(
+      `${OTHER_REPOSITORY_ROOT}/src/other.ts`,
+      markerText("other"),
+    );
+
+    const fakeGit = new FakeGitRepositoryService();
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    const snapshot = await store.refresh();
+
+    expect(snapshot.files).toEqual([
+      expect.objectContaining({
+        relativePath: "src/nested.ts",
+        repositoryRoot: resolve(NESTED_REPOSITORY_ROOT),
+      }),
+      expect.objectContaining({
+        relativePath: "src/other.ts",
+        repositoryRoot: resolve(OTHER_REPOSITORY_ROOT),
+      }),
+    ]);
+  });
+
+  it("normalizes worktree-style repository roots before matching files", async () => {
+    const fakeDocuments = new FakeDocumentLoader([
+      "/workspace/main/.git/worktrees/feature/../../../../repo-worktree",
+    ]);
+    fakeDocuments.setDocumentAtPath(
+      `${WORKTREE_REPOSITORY_ROOT}/src/conflict.ts`,
+      markerText("worktree"),
+    );
+
+    const fakeGit = new FakeGitRepositoryService();
+
+    const store = new ConflictStore({
+      documents: fakeDocuments,
+      git: fakeGit,
+    });
+
+    const snapshot = await store.refresh();
+
+    expect(snapshot.files).toEqual([
+      expect.objectContaining({
+        relativePath: "src/conflict.ts",
+        repositoryRoot: resolve(WORKTREE_REPOSITORY_ROOT),
       }),
     ]);
   });
