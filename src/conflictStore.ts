@@ -3,6 +3,8 @@ import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parseConflictMarkers } from "./conflictParser";
+import type { ConflictFilter } from "./conflictFilter";
+import { createConflictFilter } from "./conflictFilter";
 import { hasLocatedConflictMarkers, toConflictFileKey } from "./conflictScmMenu";
 import { GitRepositoryService } from "./gitRepositoryService";
 import type { ConflictBlock, ConflictFile, ConflictSnapshot, GitUnmergedFile } from "./types";
@@ -37,7 +39,9 @@ export type ConflictStoreDisposable = {
 export type ConflictStoreOptions = {
   debounceMs?: number;
   documents?: ConflictStoreDocumentLoader;
+  filter?: ConflictFilter;
   git?: ConflictStoreGitService;
+  includeLockFiles?: boolean;
   now?: () => number;
   parseConflicts?: typeof parseConflictMarkers;
   setTimeout?: typeof setTimeout;
@@ -231,6 +235,7 @@ export class ConflictStore {
   private readonly clearTimer: typeof clearTimeout;
   private readonly debounceMs: number;
   private readonly documents: ConflictStoreDocumentLoader;
+  private readonly filter: ConflictFilter;
   private readonly git: ConflictStoreGitService;
   private readonly listeners = new Set<ConflictStoreChangeListener>();
   private readonly now: () => number;
@@ -247,6 +252,9 @@ export class ConflictStore {
     this.clearTimer = options.clearTimeout ?? clearTimeout;
     this.debounceMs = options.debounceMs ?? DEFAULT_DEBOUNCE_MS;
     this.documents = options.documents ?? defaultDocumentLoader;
+    this.filter = options.filter ?? createConflictFilter({
+      includeLockFiles: options.includeLockFiles ?? false,
+    });
     this.git = options.git ?? new GitRepositoryService();
     this.now = options.now ?? Date.now;
     this.parseConflicts = options.parseConflicts ?? parseConflictMarkers;
@@ -284,6 +292,25 @@ export class ConflictStore {
 
   applyOpenDocumentText(uri: string, text: string): boolean {
     const key = toConflictFileKey(uri);
+    const filteredOut = !this.filter.isIncluded(this.relativePathForFilter(uri, key));
+    if (filteredOut) {
+      const existing = this.snapshot.files.find(
+        (file) => toConflictFileKey(file.uri) === key,
+      );
+      if (existing === undefined) {
+        return false;
+      }
+      this.recentlyOmittedFiles.set(key, existing);
+      this.snapshot = {
+        ...this.snapshot,
+        files: this.snapshot.files.filter(
+          (file) => toConflictFileKey(file.uri) !== key,
+        ),
+        locatedCount: this.snapshot.locatedCount - existing.locatedConflicts.length,
+      };
+      return true;
+    }
+
     const fileIndex = this.snapshot.files.findIndex(
       (file) => toConflictFileKey(file.uri) === key,
     );
@@ -500,6 +527,7 @@ export class ConflictStore {
 
     const snapshotFiles = [...files.values()]
       .map((entry) => entry.file)
+      .filter((file) => this.filter.isIncluded(file.relativePath))
       .filter(
         (file) =>
           !shouldOmitResolvedGitFile(
@@ -583,6 +611,17 @@ export class ConflictStore {
         return;
       }
     } else if (
+      !this.filter.isIncluded(existing.file.relativePath) &&
+      existing.file.locatedConflicts.length > 0
+    ) {
+      // ponytail: file became filtered; keep cached so toggling back restores it
+      this.recentlyOmittedFiles.set(key, {
+        ...existing.file,
+        locatedConflicts,
+        parseError,
+      });
+      return;
+    } else if (
       shouldOmitResolvedGitFile(
         existing.file.gitUnmerged,
         locatedConflicts,
@@ -607,6 +646,21 @@ export class ConflictStore {
         parseError,
       },
     });
+  }
+
+  private relativePathForFilter(uri: string, key: string): string {
+    const existing = this.snapshot.files.find(
+      (file) => toConflictFileKey(file.uri) === key,
+    );
+    if (existing !== undefined) {
+      return existing.relativePath;
+    }
+
+    const fileSystemPath = toFileSystemPath(uri);
+    if (fileSystemPath === undefined) {
+      return uri;
+    }
+    return fileSystemPath;
   }
 
   private async readDiskText(uri: string): Promise<string> {

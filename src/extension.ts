@@ -334,10 +334,15 @@ async function revealConflictInEditor(uri: string, conflict: ConflictBlock): Pro
     return;
   }
 
-  const position = new vscode.Position(conflict.startLine, 0);
-  activeEditor.selection = new vscode.Selection(position, position);
+  const startPosition = new vscode.Position(conflict.startLine, 0);
+  // ponytail: select from <<<<<<< through the separator so Adopt Current / Incoming
+  // buttons can act on the chunk immediately. Falls back to start line for diff3.
+  const separatorLine =
+    conflict.separatorLine > conflict.startLine ? conflict.separatorLine : conflict.startLine;
+  const endPosition = new vscode.Position(separatorLine, Number.MAX_SAFE_INTEGER);
+  activeEditor.selection = new vscode.Selection(startPosition, endPosition);
   await activeEditor.revealRange(
-    new vscode.Range(position, position),
+    new vscode.Range(startPosition, endPosition),
     vscode.TextEditorRevealType.InCenter,
   );
 }
@@ -348,7 +353,13 @@ export function activate(context: vscode.ExtensionContext): void {
       await vscode.commands.executeCommand("git.openMergeEditor", vscode.Uri.parse(uri));
     },
   });
-  const store = new ConflictStore({ documents: createDocumentLoader(), git });
+  const store = new ConflictStore({
+    documents: createDocumentLoader(),
+    git,
+    includeLockFiles: vscode.workspace
+      .getConfiguration("conflictResolver")
+      .get<boolean>("includeLockFiles", false),
+  });
   const remoteMr = new MergeRequestConflictService({ config: createMergeRequestConfig() });
   const tree = new ConflictTreeProvider(
     store,
@@ -611,6 +622,15 @@ export function activate(context: vscode.ExtensionContext): void {
       return uri === undefined ? undefined : git.openMergeEditor(uri);
     }),
     vscode.commands.registerCommand("conflictResolver.refreshRemoteMR", () => refreshRemoteMr(true)),
+    vscode.commands.registerCommand("conflictResolver.toggleLockFiles", async () => {
+      const config = vscode.workspace.getConfiguration("conflictResolver");
+      const current = config.get<boolean>("includeLockFiles", false);
+      const next = !current;
+      await config.update("includeLockFiles", next, vscode.ConfigurationTarget.Workspace);
+      await vscode.window.showInformationMessage(
+        next ? "已启用 lock 文件扫描" : "已跳过 lock 文件扫描",
+      );
+    }),
     treeView.onDidChangeVisibility((event) => {
       if (event.visible) {
         store.scheduleRefresh("panel-visible");
@@ -657,6 +677,9 @@ export function activate(context: vscode.ExtensionContext): void {
         event.affectsConfiguration("conflictResolver.gitlabToken")
       ) {
         void refreshRemoteMr(true);
+      }
+      if (event.affectsConfiguration("conflictResolver.includeLockFiles")) {
+        store.scheduleImmediateRefresh("lock-files-toggle");
       }
     }),
     store.onDidChange((snapshot) => {

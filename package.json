@@ -3,7 +3,7 @@
   "displayName": "Conflict Resolver",
   "description": "VS Code and Cursor extension for locating and navigating Git merge conflicts.",
   "icon": "resources/icon.png",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "publisher": "shienLiang",
   "license": "MIT",
   "author": {
@@ -72,6 +72,11 @@
       {
         "command": "conflictResolver.openMergeEditor",
         "title": "Conflict Resolver: Open Merge Editor"
+      },
+      {
+        "command": "conflictResolver.toggleLockFiles",
+        "title": "Conflict Resolver: Toggle Lock Files",
+        "icon": "$(files-skip)"
       },
       {
         "command": "conflictResolver.refreshRemoteMR",
@@ -292,6 +297,11 @@
           "type": "string",
           "default": "",
           "description": "GitLab API token; prefer environment variable GITLAB_TOKEN"
+        },
+        "conflictResolver.includeLockFiles": {
+          "type": "boolean",
+          "default": false,
+          "description": "是否扫描 lock 文件（如 pnpm-lock.yaml、package-lock.json 等）。默认跳过以提升性能。"
         }
       }
     },
