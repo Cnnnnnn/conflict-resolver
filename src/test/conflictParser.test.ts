@@ -87,4 +87,47 @@ describe("parseConflictMarkers", () => {
       },
     });
   });
+
+  it("requires exact marker lines for separators and block boundaries", () => {
+    const result = parseConflictMarkers(
+      [
+        "<<<<<<<< not-a-start",
+        "<<<<<<< HEAD",
+        "ours",
+        "======= not-a-separator",
+        "=======",
+        ">>>>>>>> not-an-end",
+        "theirs",
+        ">>>>>>> feature",
+      ].join("\n"),
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.blocks).toHaveLength(1);
+    expect(result.blocks[0]).toMatchObject({
+      startLine: 1,
+      separatorLine: 4,
+      endLine: 7,
+      oursRange: {
+        startLine: 2,
+        endLine: 3,
+      },
+      theirsRange: {
+        startLine: 5,
+        endLine: 6,
+      },
+    });
+  });
+
+  it("ignores prefixed marker-like content outside a conflict block", () => {
+    const result = parseConflictMarkers(
+      [
+        "<<<<<<<< not-a-start",
+        "======= not-a-separator",
+        ">>>>>>>> not-an-end",
+      ].join("\n"),
+    );
+
+    expect(result).toEqual({ blocks: [] });
+  });
 });

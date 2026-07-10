@@ -11,6 +11,18 @@ const END_MARKER = ">>>>>>>";
 
 type ParserState = "normal" | "ours" | "theirs";
 
+function isStartMarkerLine(line: string): boolean {
+  return line === START_MARKER || /^<<<<<<< .+$/.test(line);
+}
+
+function isSeparatorMarkerLine(line: string): boolean {
+  return line === SEPARATOR_MARKER;
+}
+
+function isEndMarkerLine(line: string): boolean {
+  return line === END_MARKER || /^>>>>>>> .+$/.test(line);
+}
+
 export function parseConflictMarkers(text: string): ParseResult {
   if (text.length === 0) {
     return { blocks: [] };
@@ -24,14 +36,14 @@ export function parseConflictMarkers(text: string): ParseResult {
 
   for (const [lineNumber, line] of lines.entries()) {
     if (state === "normal") {
-      if (line.startsWith(START_MARKER)) {
+      if (isStartMarkerLine(line)) {
         state = "ours";
         startLine = lineNumber;
         separatorLine = -1;
         continue;
       }
 
-      if (line.startsWith(SEPARATOR_MARKER) || line.startsWith(END_MARKER)) {
+      if (isSeparatorMarkerLine(line) || isEndMarkerLine(line)) {
         return {
           blocks,
           error: `invalid conflict marker order at line ${lineNumber}`,
@@ -42,13 +54,13 @@ export function parseConflictMarkers(text: string): ParseResult {
     }
 
     if (state === "ours") {
-      if (line.startsWith(SEPARATOR_MARKER)) {
+      if (isSeparatorMarkerLine(line)) {
         state = "theirs";
         separatorLine = lineNumber;
         continue;
       }
 
-      if (line.startsWith(END_MARKER)) {
+      if (isEndMarkerLine(line)) {
         return {
           blocks,
           error: `invalid conflict marker order at line ${lineNumber}`,
@@ -58,7 +70,7 @@ export function parseConflictMarkers(text: string): ParseResult {
       continue;
     }
 
-    if (line.startsWith(END_MARKER)) {
+    if (isEndMarkerLine(line)) {
       blocks.push({
         id: `${startLine}:${lineNumber}`,
         startLine,
@@ -80,7 +92,7 @@ export function parseConflictMarkers(text: string): ParseResult {
       continue;
     }
 
-    if (line.startsWith(SEPARATOR_MARKER)) {
+    if (isSeparatorMarkerLine(line)) {
       return {
         blocks,
         error: `invalid conflict marker order at line ${lineNumber}`,
