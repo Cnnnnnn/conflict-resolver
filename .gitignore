@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.vsix
+.token-savior-cache.json
