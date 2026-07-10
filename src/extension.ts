@@ -101,7 +101,6 @@ export function activate(context: vscode.ExtensionContext): void {
     overviewDecoration,
     navigation,
     statusBar,
-    vscode.window.registerTreeDataProvider("conflictResolver.tree", tree),
     vscode.commands.registerCommand(CONFLICT_TREE_GO_TO_COMMAND, (args: { uri: string; conflictId: string }) => navigation.goTo(args.uri, args.conflictId)),
     vscode.commands.registerCommand("conflictResolver.nextConflict", () => navigation.next()),
     vscode.commands.registerCommand("conflictResolver.previousConflict", () => navigation.previous()),
