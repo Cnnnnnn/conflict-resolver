@@ -239,6 +239,11 @@
         "icon": "$(discard)"
       },
       {
+        "command": "conflictResolver.continueScenario",
+        "title": "Conflict Resolver: Continue Merge/Rebase/Cherry-pick",
+        "icon": "$(debug-continue)"
+      },
+      {
         "command": "conflictResolver.back",
         "title": "Conflict Resolver: Back to Previous Conflict",
         "icon": "$(arrow-left)"
@@ -327,14 +332,19 @@
           "group": "navigation@7"
         },
         {
+          "command": "conflictResolver.continueScenario",
+          "when": "view == conflictResolver.tree && conflictResolver.scenarioInProgress",
+          "group": "navigation@8"
+        },
+        {
           "command": "conflictResolver.back",
           "when": "view == conflictResolver.tree && conflictResolver.hasUndo",
-          "group": "navigation@8"
+          "group": "navigation@9"
         },
         {
           "command": "conflictResolver.undoLastAccept",
           "when": "view == conflictResolver.tree && conflictResolver.hasUndo",
-          "group": "navigation@9"
+          "group": "navigation@10"
         }
       ],
       "view/item/context": [

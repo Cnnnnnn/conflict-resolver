@@ -10,6 +10,7 @@ import {
   CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
   CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
   CONFLICT_TREE_ACCEPT_BOTH_COMMAND,
+  CONFLICT_TREE_OPEN_DIFF_COMMAND,
   CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND,
   ConflictTreeProvider,
   type ConflictTreeCommandArguments,
@@ -21,6 +22,11 @@ import {
   updateConflictWorkState,
 } from "./conflictCompletion";
 import { createConflictFilter, isLockFilePath, type ConflictFilterMode } from "./conflictFilter";
+import {
+  createConflictDiffPreviewer,
+  fetchConflictSides,
+  type ConflictDiffPreviewer,
+} from "./conflictDiffPreview";
 import { GitRepositoryService } from "./gitRepositoryService";
 import {
   ACCEPT_CURRENT_CONFLICT_COMMAND,
@@ -51,6 +57,13 @@ import {
   toConflictFileKey,
 } from "./conflictScmMenu";
 import { formatMergeProgressLabel, getMergeProgress } from "./mergeProgress";
+import {
+  detectMergeScenario,
+  formatScenarioLabel,
+  formatScenarioTitle,
+  runScenarioContinue,
+  type MergeScenario,
+} from "./mergeScenario";
 import type { ConflictBlock } from "./types";
 import { ConflictStatusBar } from "./statusBar";
 
@@ -599,6 +612,7 @@ type ConflictResolverDeps = {
   fileDecorations: ConflictFileDecorationProvider;
   fileDecorationChangeEmitter: vscode.EventEmitter<vscode.Uri[] | undefined>;
   conflictUndoWorkspace: ConflictUndoWorkspace;
+  diffPreviewer: ConflictDiffPreviewer;
 };
 
 function registerConflictSubscriptions(
@@ -619,6 +633,7 @@ function registerConflictSubscriptions(
     fileDecorations,
     fileDecorationChangeEmitter,
     conflictUndoWorkspace,
+    diffPreviewer,
   } = deps;
 
   context.subscriptions.push(
@@ -651,6 +666,26 @@ function registerConflictSubscriptions(
       CONFLICT_TREE_ACCEPT_BOTH_COMMAND,
       (args: ConflictTreeCommandArguments) =>
         acceptConflictAndAdvance("both", args, store, navigation, undoStore, syncUndoContext),
+    ),
+    vscode.commands.registerCommand(
+      CONFLICT_TREE_OPEN_DIFF_COMMAND,
+      async (args: ConflictTreeCommandArguments) => {
+        const snapshot = store.getSnapshot();
+        const file = snapshot.files.find((candidate) => candidate.uri === args.uri);
+        const conflict = file?.locatedConflicts.find(
+          (candidate) => candidate.id === args.conflictId,
+        );
+        if (file === undefined || conflict === undefined) {
+          await vscode.window.showWarningMessage("未找到可对比的冲突");
+          return;
+        }
+        const sides = await fetchConflictSides(args.uri, conflict);
+        if (sides === undefined) {
+          await vscode.window.showWarningMessage("无法读取冲突文件内容");
+          return;
+        }
+        await diffPreviewer.openDiff(args.uri, conflict, sides, file.relativePath);
+      },
     ),
     vscode.commands.registerCommand("conflictResolver.undoLastAccept", async () => {
       const entries = undoStore.take();
@@ -831,6 +866,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let conflictWorkState = EMPTY_CONFLICT_WORK_STATE;
   let locatedClearedNotified = false;
   let previousSnapshot = store.getSnapshot();
+  let activeScenario: MergeScenario = { kind: "none", inProgress: false };
   const startDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
     overviewRulerColor: new vscode.ThemeColor("editorWarning.foreground"),
@@ -905,6 +941,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     createRange: (start, end) => new vscode.Range(start, end),
   };
 
+  const diffPreviewer: ConflictDiffPreviewer = createConflictDiffPreviewer();
+
   const updateConflictBadges = (snapshot: ReturnType<typeof store.getSnapshot>): void => {
     const count = getConflictBadgeCount(snapshot);
     treeView.badge =
@@ -915,9 +953,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     treeView.message =
       completionMessage ??
       (() => {
-        const label = formatMergeProgressLabel(getMergeProgress(snapshot));
+        const label = formatMergeProgressLabel(getMergeProgress(snapshot, activeScenario));
         return label === "无待处理冲突" ? undefined : label;
       })();
+    void vscode.commands.executeCommand(
+      "setContext",
+      "conflictResolver.scenarioInProgress",
+      activeScenario.inProgress,
+    );
+    void vscode.commands.executeCommand(
+      "setContext",
+      "conflictResolver.scenarioKind",
+      activeScenario.kind,
+    );
   };
 
   const handleSnapshotTransition = (snapshot: ReturnType<typeof store.getSnapshot>): void => {
@@ -926,9 +974,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       !locatedClearedNotified
     ) {
       locatedClearedNotified = true;
-      void vscode.window.showInformationMessage(
-        formatLocatedClearedNotification(snapshot),
-      );
+      const scenarioTitle = formatScenarioTitle(activeScenario);
+      const message =
+        scenarioTitle !== undefined
+          ? `${formatLocatedClearedNotification(snapshot)}（${scenarioTitle} 可继续）`
+          : formatLocatedClearedNotification(snapshot);
+      void vscode.window.showInformationMessage(message);
     }
 
     if (snapshot.locatedCount > 0) {
@@ -940,9 +991,46 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     previousSnapshot = snapshot;
   };
 
+  const refreshScenario = async (): Promise<void> => {
+    const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const scenario: MergeScenario = repoRoot === undefined
+      ? { kind: "none", inProgress: false }
+      : await detectMergeScenario(repoRoot);
+    activeScenario = scenario;
+  };
+
+  const ensureScenarioUpToDate = async (snapshot: ReturnType<typeof store.getSnapshot>): Promise<void> => {
+    await refreshScenario();
+    if (
+      activeScenario.inProgress &&
+      formatScenarioLabel(activeScenario) !== undefined
+    ) {
+      void scenarioWatchEmitter.fire(snapshot);
+    }
+  };
+
+  const scenarioWatchEmitter = new vscode.EventEmitter<
+    ReturnType<typeof store.getSnapshot>
+  >();
+
   registerGitStateWatchers(context, () => store.scheduleImmediateRefresh("git-state"));
   registerBuiltinGitRefresh(context, () => store.scheduleImmediateRefresh("git-repository-state"));
   registerScmConflictMenus(context, store, navigation, git);
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("conflictResolver.continueScenario", async () => {
+      await refreshScenario();
+      const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      const result = await runScenarioContinue(activeScenario, repoRoot);
+      if (!result.ok) {
+        await vscode.window.showWarningMessage(result.message);
+        return;
+      }
+      store.scheduleImmediateRefresh("scenario-continue");
+    }),
+  );
+
+  void refreshScenario().catch(logError);
 
   const refreshConflictUi = async (snapshot: ReturnType<typeof store.getSnapshot>): Promise<void> => {
     handleSnapshotTransition(snapshot);
@@ -953,6 +1041,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       snapshot,
       vscode.window.activeTextEditor?.document.uri.toString(),
     );
+    await ensureScenarioUpToDate(snapshot);
     // NOTE: intentionally NOT calling `git refresh` here. It forced the built-in
     // Git extension to re-scan the whole repository on every snapshot change,
     // and could form a feedback loop with the changes we observe. The extension
@@ -975,6 +1064,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     fileDecorations,
     fileDecorationChangeEmitter,
     conflictUndoWorkspace,
+    diffPreviewer,
   });
   syncUndoContext();
 

@@ -55,7 +55,17 @@ describe("mergeProgress", () => {
       gitOnlyFileCount: 1,
     });
     expect(formatMergeProgressLabel(progress)).toBe(
-      "剩余 2 文件 · 1 处冲突 · 1 处未知冲突",
+      "2 文件 · 1 处冲突 · 1 处未知冲突",
+    );
+  });
+
+  it("prepends scenario context when present", () => {
+    const progress = getMergeProgress(
+      createSnapshot([]),
+      { kind: "rebase", inProgress: true, continueCommand: "git rebase --continue" },
+    );
+    expect(formatMergeProgressLabel(progress)).toBe(
+      "rebase：剩余待完成步骤",
     );
   });
 });

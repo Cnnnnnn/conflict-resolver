@@ -134,7 +134,7 @@ describe("ConflictTreeProvider", () => {
 
     const rootItems = await provider.getChildren();
     expect(rootItems).toHaveLength(3);
-    expect(rootItems[0].label).toBe("剩余 3 文件 · 3 处冲突 · 2 处未知冲突");
+    expect(rootItems[0].label).toBe("3 文件 · 3 处冲突 · 2 处未知冲突");
     expect(rootItems.slice(1).map((item) => item.label)).toEqual([
       "可定位冲突：3",
       "Git 未解决但位置未知：2",
@@ -183,7 +183,7 @@ describe("ConflictTreeProvider", () => {
       ],
     });
     const firstConflict = conflicts[0] as ConflictTreeConflictItem;
-    expect(firstConflict.buttons).toHaveLength(3);
+    expect(firstConflict.buttons).toHaveLength(4);
     expect(firstConflict.buttons?.[0]?.command).toMatchObject({
       command: CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
       arguments: [{ uri: zFile.uri, conflictId: "z-early" }],

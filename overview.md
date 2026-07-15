@@ -13,13 +13,17 @@
 | `conflictNavigation` | 跨文件上一个/下一个冲突 |
 | `conflictTreeProvider` | 侧边栏树视图 |
 | `conflictResolution` | 采纳当前 / 传入 / 双方（含文本回退） |
+| `conflictDiffPreview` | 临时 ours/theirs 文件 + `vscode.diff` 三向对比 |
+| `mergeScenario` | 读取 `.git/MERGE_HEAD/REBASE_HEAD/CHERRY_PICK_HEAD` 判定场景 |
 | `gitRepositoryService` | Git 子进程封装（超时、路径安全） |
 
 ## 近期变更
 
 - **移除 GitLab 远程 MR 集成**：删除 API 客户端、Token 配置、远程 MR 面板；扩展仅处理本地工作区冲突。
 - **保留双方采纳**：冲突项新增第三个按钮；支持批量 `batchAcceptBoth`；内置 `merge-conflict.accept.both` 不可用时走文本回退。
-- **兼容 Cursor / 旧版 VS Code**：`engines.vscode` 降至 `^1.85.0`。
+- **CI 拆分与缓存**：`ci.yml` 跑 `npm ci + npm run check`；`release.yml` 仅在 `v*` tag 触发，`vsce` 走 `--no-dependencies`。
+- **三向 diff 预览**：冲突项新增"对比当前 vs 传入"按钮，把两侧文本写入临时文件后调用 `vscode.diff`，只读不写工作区。
+- **合并场景感知**：扩展读取 `.git/MERGE_HEAD / REBASE_HEAD / CHERRY_PICK_HEAD` 判断当前场景；面板顶部与完成通知显示对应文案；新增 `Continue Merge/Rebase/Cherry-pick` 命令（仅当处于场景时显示），打开终端发送 `--continue`。
 - **activate 冒烟测试**：`src/test/extension.smoke.test.ts` 验证核心命令注册。
 
 ## 采纳策略

@@ -37,6 +37,8 @@ export const CONFLICT_TREE_ACCEPT_INCOMING_COMMAND =
   "conflictResolver.acceptIncomingConflict";
 export const CONFLICT_TREE_ACCEPT_BOTH_COMMAND =
   "conflictResolver.acceptBothConflict";
+export const CONFLICT_TREE_OPEN_DIFF_COMMAND =
+  "conflictResolver.openConflictDiff";
 export const CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND =
   "conflictResolver.openMergeEditorForFile";
 
@@ -160,6 +162,22 @@ function createAcceptIncomingButton(
       command: CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
       title: "采用传入",
       arguments: [createConflictCommandArguments(uri, conflictId)],
+    },
+  };
+}
+
+function createOpenDiffButton(
+  uri: string,
+  conflictId: string,
+  createThemeIcon?: ThemeIconFactory,
+): ConflictTreeItemButton {
+  return {
+    iconPath: createThemeIcon?.("diff"),
+    tooltip: "对比当前 vs 传入",
+    command: {
+      command: CONFLICT_TREE_OPEN_DIFF_COMMAND,
+      title: "Open conflict diff",
+      arguments: [{ uri, conflictId } satisfies ConflictTreeCommandArguments],
     },
   };
 }
@@ -320,6 +338,7 @@ function createConflictItem(
       createAcceptCurrentButton(file.uri, conflict.id, createThemeIcon),
       createAcceptIncomingButton(file.uri, conflict.id, createThemeIcon),
       createAcceptBothButton(file.uri, conflict.id, createThemeIcon),
+      createOpenDiffButton(file.uri, conflict.id, createThemeIcon),
     ],
     collapsibleState: vscode.TreeItemCollapsibleState.None,
     checked,
