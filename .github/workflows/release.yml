@@ -31,6 +31,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - run: npm ci || npm install
+      - run: npm run compile
       - run: npx @vscode/vsce package
 
       - name: Publish to VS Code Marketplace
