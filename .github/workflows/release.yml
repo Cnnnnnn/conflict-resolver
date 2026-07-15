@@ -22,17 +22,45 @@ jobs:
       - run: npm run check
       - run: npx @vscode/vsce package --no-dependencies
 
+      - name: Dry-run summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          vsix=$(ls *.vsix | head -n 1)
+          bytes=$(stat -c %s "$vsix" 2>/dev/null || stat -f %z "$vsix")
+          kb=$(( bytes / 1024 ))
+          sha=$(sha256sum "$vsix" 2>/dev/null | awk '{print $1}' || shasum -a 256 "$vsix" | awk '{print $1}')
+          {
+            echo "### Release dry-run"
+            echo "- version: \`$version\`"
+            echo "- package: \`$vsix\` (${kb} KB)"
+            echo "- sha256: \`$sha\`"
+            echo "- marketplaces: vsce=$([ -n "${VSCE_PAT:-}" ] && echo on || echo off) ovsx=$([ -n "${OVSX_PAT:-}" ] && echo on || echo off)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Publish to VS Code Marketplace
         if: env.VSCE_PAT != ''
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
         run: npx @vscode/vsce publish -p "$VSCE_PAT" --no-dependencies
+        continue-on-error: true
 
       - name: Publish to Open VSX
         if: env.OVSX_PAT != ''
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
         run: npx ovsx publish -p "$OVSX_PAT"
+        continue-on-error: true
+
+      - name: Warn when marketplace secrets are missing
+        if: env.VSCE_PAT == '' || env.OVSX_PAT == ''
+        shell: bash
+        run: |
+          echo "::warning::Marketplace / Open VSX publish skipped — missing secret(s):"
+          [ -z "${VSCE_PAT:-}" ] && echo "::warning::  - VSCE_PAT (https://dev.azure.com/_users/settings/tokens, scope: Marketplace → Manage)"
+          [ -z "${OVSX_PAT:-}" ] && echo "::warning::  - OVSX_PAT (https://open-vsx.org/user-settings/tokens)"
+          echo "::warning::Add them at https://github.com/${{ github.repository }}/settings/secrets/actions then re-run this workflow."
 
       - name: Upload GitHub Release
         uses: softprops/action-gh-release@v2
