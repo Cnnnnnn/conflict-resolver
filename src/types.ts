@@ -28,26 +28,3 @@ export type GitUnmergedFile = {
   repositoryRoot: string;
   relativePath: string;
 };
-
-export type MergeRequestConflict = {
-  iid: number;
-  title: string;
-  webUrl: string;
-  sourceBranch: string;
-  targetBranch: string;
-  hasConflicts: boolean;
-};
-
-export type RemoteMergeRequestSnapshot = {
-  repositoryRoot: string;
-  branch: string;
-  mergeRequests: MergeRequestConflict[];
-  error?:
-    | "not-configured"
-    | "not-found"
-    | "unauthorized"
-    | "network"
-    | "invalid-response"
-    | "detached-head";
-  generatedAt: number;
-};

@@ -5,15 +5,14 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
   CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
+  CONFLICT_TREE_ACCEPT_BOTH_COMMAND,
   CONFLICT_TREE_GO_TO_COMMAND,
-  CONFLICT_TREE_OPEN_MR_COMMAND,
   ConflictTreeProvider,
   type ConflictTreeConflictItem,
   type ConflictTreeFileItem,
   type ConflictTreeGroupItem,
-  type ConflictTreeRemoteMrItem,
 } from "../conflictTreeProvider";
-import type { ConflictSnapshot, RemoteMergeRequestSnapshot } from "../types";
+import type { ConflictSnapshot } from "../types";
 
 function toUri(filePath: string): string {
   return pathToFileURL(filePath).toString();
@@ -60,37 +59,6 @@ class FakeConflictStore {
   }
 
   async emit(snapshot: ConflictSnapshot): Promise<void> {
-    this.snapshot = snapshot;
-
-    for (const listener of [...this.listeners]) {
-      await listener(snapshot);
-    }
-  }
-}
-
-class FakeRemoteMrStore {
-  private readonly listeners = new Set<(snapshot: RemoteMergeRequestSnapshot) => unknown>();
-  private snapshot: RemoteMergeRequestSnapshot;
-
-  constructor(snapshot: RemoteMergeRequestSnapshot) {
-    this.snapshot = snapshot;
-  }
-
-  getSnapshot(): RemoteMergeRequestSnapshot {
-    return this.snapshot;
-  }
-
-  onDidChange(listener: (snapshot: RemoteMergeRequestSnapshot) => unknown) {
-    this.listeners.add(listener);
-
-    return {
-      dispose: () => {
-        this.listeners.delete(listener);
-      },
-    };
-  }
-
-  async emit(snapshot: RemoteMergeRequestSnapshot): Promise<void> {
     this.snapshot = snapshot;
 
     for (const listener of [...this.listeners]) {
@@ -215,13 +183,17 @@ describe("ConflictTreeProvider", () => {
       ],
     });
     const firstConflict = conflicts[0] as ConflictTreeConflictItem;
-    expect(firstConflict.buttons).toHaveLength(2);
+    expect(firstConflict.buttons).toHaveLength(3);
     expect(firstConflict.buttons?.[0]?.command).toMatchObject({
       command: CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
       arguments: [{ uri: zFile.uri, conflictId: "z-early" }],
     });
     expect(firstConflict.buttons?.[1]?.command).toMatchObject({
       command: CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
+      arguments: [{ uri: zFile.uri, conflictId: "z-early" }],
+    });
+    expect(firstConflict.buttons?.[2]?.command).toMatchObject({
+      command: CONFLICT_TREE_ACCEPT_BOTH_COMMAND,
       arguments: [{ uri: zFile.uri, conflictId: "z-early" }],
     });
   });
@@ -241,7 +213,7 @@ describe("ConflictTreeProvider", () => {
         { gitOnlyCount: 0, locatedCount: 0 },
       ),
     );
-    const provider = new ConflictTreeProvider(store, undefined, undefined, {
+    const provider = new ConflictTreeProvider(store, undefined, {
       getFileText: () => "<<<<<<<\nours\n=======\ntheirs\n>>>>>>>",
     });
     provider.setWorkState({ hadLocatedConflicts: true, hadUnmergedFiles: true });
@@ -272,7 +244,7 @@ describe("ConflictTreeProvider", () => {
         },
       ]),
     );
-    const activeProvider = new ConflictTreeProvider(activeStore, undefined, undefined, {
+    const activeProvider = new ConflictTreeProvider(activeStore, undefined, {
       getFileText: () => "<<<<<<<\nours\n=======\ntheirs\n>>>>>>>",
     });
     const activeRootItems = await activeProvider.getChildren();
@@ -332,105 +304,5 @@ describe("ConflictTreeProvider", () => {
       "beta.ts",
     ]);
     expect(await provider.getChildren(gitOnlyGroup as ConflictTreeGroupItem)).toEqual([]);
-  });
-
-  it("renders remote MR items sorted by IID with open-url command payloads", async () => {
-    const store = new FakeConflictStore(createSnapshot([]));
-    const remoteStore = new FakeRemoteMrStore({
-      repositoryRoot: "/repo",
-      branch: "feature/login",
-      generatedAt: 1,
-      mergeRequests: [
-        {
-          iid: 123,
-          title: "Login flow",
-          webUrl: "https://gitlab.com/group/project/-/merge_requests/123",
-          sourceBranch: "feature/login",
-          targetBranch: "main",
-          hasConflicts: true,
-        },
-        {
-          iid: 45,
-          title: "Earlier MR",
-          webUrl: "https://gitlab.com/group/project/-/merge_requests/45",
-          sourceBranch: "feature/login",
-          targetBranch: "main",
-          hasConflicts: false,
-        },
-      ],
-    });
-
-    const provider = new ConflictTreeProvider(store, remoteStore);
-    const rootItems = await provider.getChildren();
-    expect(rootItems).toHaveLength(3);
-
-    const remoteGroup = rootItems[2] as ConflictTreeGroupItem;
-    expect(remoteGroup.label).toBe("远程 MR");
-
-    const remoteItems = await provider.getChildren(remoteGroup);
-    expect(remoteItems.map((item) => item.label)).toEqual([
-      "!45 feature/login → main",
-      "!123 feature/login → main",
-    ]);
-    expect(remoteItems.map((item) => item.description)).toEqual([
-      "无合并冲突",
-      "存在合并冲突",
-    ]);
-
-    const firstMr = remoteItems[0] as ConflictTreeRemoteMrItem;
-    expect(firstMr.command).toEqual({
-      command: CONFLICT_TREE_OPEN_MR_COMMAND,
-      title: "Open merge request",
-      arguments: [{ webUrl: "https://gitlab.com/group/project/-/merge_requests/45" }],
-    });
-
-    const mrActions = await provider.getChildren(firstMr);
-    expect(mrActions.map((item) => item.label)).toEqual([
-      "获取目标分支 origin/main",
-      "本地预演合并",
-      "打开 MR 页面",
-    ]);
-
-    const conflictMr = remoteItems[1] as ConflictTreeRemoteMrItem;
-    const conflictActions = await provider.getChildren(conflictMr);
-    expect(conflictActions.map((item) => item.label)).toContain("在 GitLab 解决冲突");
-  });
-
-  it("shows remote status messages for empty and error snapshots", async () => {
-    const store = new FakeConflictStore(createSnapshot([]));
-    const remoteStore = new FakeRemoteMrStore({
-      repositoryRoot: "/repo",
-      branch: "feature/login",
-      generatedAt: 1,
-      mergeRequests: [],
-      error: "not-found",
-    });
-
-    const provider = new ConflictTreeProvider(store, remoteStore);
-    const remoteGroup = (await provider.getChildren()).at(-1) as ConflictTreeGroupItem;
-    const statusItems = await provider.getChildren(remoteGroup);
-
-    expect(statusItems).toHaveLength(1);
-    expect(statusItems[0].label).toBe("未找到当前分支 MR");
-  });
-
-  it("hides the remote group when GitLab is not configured", async () => {
-    const store = new FakeConflictStore(createSnapshot([]));
-    const remoteStore = new FakeRemoteMrStore({
-      repositoryRoot: "/repo",
-      branch: "",
-      generatedAt: 1,
-      mergeRequests: [],
-      error: "not-configured",
-    });
-
-    const provider = new ConflictTreeProvider(store, remoteStore);
-    const rootItems = await provider.getChildren();
-
-    expect(rootItems).toHaveLength(2);
-    expect(rootItems.map((item) => item.label)).toEqual([
-      "可定位冲突：0",
-      "Git 未解决但位置未知：0",
-    ]);
   });
 });

@@ -1,24 +1,18 @@
 import * as vscode from "vscode";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 
 import { ConflictDecorationManager } from "./conflictDecorations";
 import { ConflictFileDecorationProvider, getConflictBadgeCount } from "./conflictFileDecorations";
 import { ConflictNavigation } from "./conflictNavigation";
-import { ConflictStore } from "./conflictStore";
-import type { ConflictStoreDocumentLoader } from "./conflictStore";
+import { ConflictStore, type ConflictStoreDocumentLoader } from "./conflictStore";
 import {
-  CONFLICT_TREE_FETCH_MR_TARGET_COMMAND,
   CONFLICT_TREE_GO_TO_COMMAND,
   CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
   CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
+  CONFLICT_TREE_ACCEPT_BOTH_COMMAND,
   CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND,
-  CONFLICT_TREE_OPEN_MR_COMMAND,
-  CONFLICT_TREE_OPEN_MR_CONFLICTS_COMMAND,
-  CONFLICT_TREE_PREVIEW_MR_MERGE_COMMAND,
   ConflictTreeProvider,
   type ConflictTreeCommandArguments,
-  type ConflictTreeMrActionArguments,
-  type ConflictTreeOpenMrArguments,
 } from "./conflictTreeProvider";
 import {
   EMPTY_CONFLICT_WORK_STATE,
@@ -29,13 +23,21 @@ import {
 import { createConflictFilter, isLockFilePath, type ConflictFilterMode } from "./conflictFilter";
 import { GitRepositoryService } from "./gitRepositoryService";
 import {
+  ACCEPT_CURRENT_CONFLICT_COMMAND,
+  ACCEPT_INCOMING_CONFLICT_COMMAND,
+  ACCEPT_BOTH_CONFLICT_COMMAND,
   applyConflictResolution,
   applyBatchConflictResolution,
   collectBatchTargets,
   formatBatchResolutionMessage,
   type ConflictResolutionSide,
 } from "./conflictResolution";
-import { applyConflictUndo, createConflictUndoStore, type ConflictUndoEntry } from "./conflictUndo";
+import {
+  applyConflictUndo,
+  createConflictUndoStore,
+  type ConflictUndoEntry,
+  type ConflictUndoWorkspace,
+} from "./conflictUndo";
 import {
   buildScmEditorSlotContext,
   canonicalizeConflictUri,
@@ -48,16 +50,51 @@ import {
   SCM_LOCATED_SLOT_COUNT,
   toConflictFileKey,
 } from "./conflictScmMenu";
-import { MergeRequestConflictService } from "./mergeRequestConflictService";
-import {
-  buildMrConflictsUrl,
-  fetchMrTargetBranch,
-  formatMergePreviewMessage,
-  previewMrMerge,
-} from "./mergeRequestActions";
 import { formatMergeProgressLabel, getMergeProgress } from "./mergeProgress";
 import type { ConflictBlock } from "./types";
 import { ConflictStatusBar } from "./statusBar";
+
+const GIT_STATE_WATCH_PATTERNS = [
+  "**/.git/MERGE_HEAD",
+  "**/.git/CHERRY_PICK_HEAD",
+  "**/.git/REBASE_MERGE",
+  "**/.git/index",
+] as const;
+
+const DOCUMENT_CHANGE_DEBOUNCE_MS = 16;
+
+// Skip reading files larger than this from disk so a huge unmerged file cannot
+// block the UI thread; its git state is still reflected via the index.
+const MAX_DISK_READ_BYTES = 5 * 1024 * 1024;
+
+// Built-in `merge-conflict.accept.*` commands are provided by VS Code's built-in
+// Merge Conflict support. When they are unavailable (e.g. disabled, or a Cursor
+// build without them) we fall back to a text-based resolution.
+let builtinMergeConflictAvailable = true;
+let builtinMergeConflictBothAvailable = false;
+
+// Module-level handles so deactivate() can cancel in-flight work on shutdown.
+let activeStore: ConflictStore | undefined;
+
+// Cache of the last setContext values so we only issue a `setContext` IPC
+// round-trip when a value actually changes (was ~24 IPC calls per refresh).
+const scmContextCache = new Map<string, unknown>();
+
+function logError(error: unknown): void {
+  console.error("[conflict-resolver]", error instanceof Error ? error.message : String(error));
+}
+
+function isTrackedConflictDocument(
+  document: vscode.TextDocument,
+  snapshot: ReturnType<ConflictStore["getSnapshot"]>,
+): boolean {
+  const key = toConflictFileKey(document.uri.fsPath);
+  if (snapshot.files.some((file) => toConflictFileKey(file.uri) === key)) {
+    return true;
+  }
+
+  return hasLocatedConflictMarkers(document.getText());
+}
 
 function createDocumentLoader(): ConflictStoreDocumentLoader {
   const collectOpenDocuments = (): Array<{ uri: string; getText: () => string }> => {
@@ -95,33 +132,16 @@ function createDocumentLoader(): ConflictStoreDocumentLoader {
     getRepositoryRoots: () => (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri.fsPath),
     readDiskText: async (uri) => {
       try {
+        const fileStat = await stat(vscode.Uri.parse(uri).fsPath);
+        if (fileStat.size > MAX_DISK_READ_BYTES) {
+          return "";
+        }
         return await readFile(vscode.Uri.parse(uri).fsPath, "utf8");
       } catch {
         return undefined;
       }
     },
   };
-}
-
-const GIT_STATE_WATCH_PATTERNS = [
-  "**/.git/MERGE_HEAD",
-  "**/.git/CHERRY_PICK_HEAD",
-  "**/.git/REBASE_MERGE",
-  "**/.git/index",
-] as const;
-
-const DOCUMENT_CHANGE_DEBOUNCE_MS = 16;
-
-function isTrackedConflictDocument(
-  document: vscode.TextDocument,
-  snapshot: ReturnType<ConflictStore["getSnapshot"]>,
-): boolean {
-  const key = toConflictFileKey(document.uri.fsPath);
-  if (snapshot.files.some((file) => toConflictFileKey(file.uri) === key)) {
-    return true;
-  }
-
-  return hasLocatedConflictMarkers(document.getText());
 }
 
 function registerGitStateWatchers(
@@ -190,24 +210,18 @@ async function updateScmMenuContext(
   editorUri: string | undefined,
 ): Promise<void> {
   const menuContext = getMergeConflictMenuContext(snapshot);
-  await vscode.commands.executeCommand(
-    "setContext",
-    "conflictResolver.hasMergeConflicts",
-    menuContext.hasMergeConflicts,
-  );
-  await vscode.commands.executeCommand(
-    "setContext",
-    "conflictResolver.hasLocatedConflicts",
-    snapshot.locatedCount > 0,
-  );
-  await vscode.commands.executeCommand(
-    "setContext",
-    "conflictResolver.hasGitOnlyMergeFiles",
-    menuContext.hasGitOnlyMergeFiles,
-  );
+  const entries: Array<[string, unknown]> = [
+    ["conflictResolver.hasMergeConflicts", menuContext.hasMergeConflicts],
+    ["conflictResolver.hasLocatedConflicts", snapshot.locatedCount > 0],
+    ["conflictResolver.hasGitOnlyMergeFiles", menuContext.hasGitOnlyMergeFiles],
+    ...Object.entries(buildScmEditorSlotContext(snapshot, editorUri)),
+  ];
 
-  const editorContext = buildScmEditorSlotContext(snapshot, editorUri);
-  for (const [key, value] of Object.entries(editorContext)) {
+  for (const [key, value] of entries) {
+    if (scmContextCache.get(key) === value) {
+      continue;
+    }
+    scmContextCache.set(key, value);
     await vscode.commands.executeCommand("setContext", key, value);
   }
 }
@@ -300,25 +314,6 @@ function createDecorationAdapter(
   };
 }
 
-function getPrimaryRepositoryRoot(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-}
-
-function createMergeRequestConfig(): {
-  getGitlabUrl(): string;
-  getGitlabToken(): string;
-  getEnvToken(): string | undefined;
-} {
-  return {
-    getGitlabUrl: () =>
-      vscode.workspace.getConfiguration("conflictResolver").get<string>("gitlabUrl") ??
-      "https://gitlab.com",
-    getGitlabToken: () =>
-      vscode.workspace.getConfiguration("conflictResolver").get<string>("gitlabToken") ?? "",
-    getEnvToken: () => process.env.GITLAB_TOKEN,
-  };
-}
-
 function getConflictFileText(uri: string): string | undefined {
   const key = toConflictFileKey(uri);
   for (const document of vscode.workspace.textDocuments) {
@@ -343,7 +338,7 @@ async function revealConflictInEditor(uri: string, conflict: ConflictBlock): Pro
   }
 
   const startPosition = new vscode.Position(conflict.startLine, 0);
-  // ponytail: select from <<<<<<< through the separator so Adopt Current / Incoming
+  // Select from <<<<<<< through the separator so Adopt Current / Incoming
   // buttons can act on the chunk immediately. Falls back to start line for diff3.
   const separatorLine =
     conflict.separatorLine > conflict.startLine ? conflict.separatorLine : conflict.startLine;
@@ -358,6 +353,35 @@ async function revealConflictInEditor(uri: string, conflict: ConflictBlock): Pro
 async function updateFilterMode(mode: ConflictFilterMode): Promise<void> {
   const config = vscode.workspace.getConfiguration("conflictResolver");
   await config.update("treeFilterMode", mode, vscode.ConfigurationTarget.Workspace);
+}
+
+/**
+ * Text-based conflict resolution used when the built-in `merge-conflict.accept.*`
+ * command is unavailable. Replaces the conflict region (markers included) with
+ * the chosen side, preserving the document's line endings.
+ */
+async function resolveConflictByTextEdit(
+  uri: string,
+  conflict: ConflictBlock,
+  side: ConflictResolutionSide,
+): Promise<boolean> {
+  try {
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.parse(uri));
+    const lines = document.getText().split("\n");
+    const ours = lines.slice(conflict.oursRange.startLine, conflict.oursRange.endLine + 1);
+    const theirs = lines.slice(conflict.theirsRange.startLine, conflict.theirsRange.endLine + 1);
+    const kept =
+      side === "current" ? ours : side === "incoming" ? theirs : [...ours, ...theirs];
+    const eol = document.eol === vscode.EndOfLine.CRLF ? "\r\n" : "\n";
+    const startPos = document.lineAt(conflict.startLine).range.start;
+    const endLineInfo = document.lineAt(conflict.endLine);
+    const endPos = new vscode.Position(conflict.endLine, endLineInfo.text.length);
+    const edit = new vscode.WorkspaceEdit();
+    edit.replace(document.uri, new vscode.Range(startPos, endPos), kept.join(eol));
+    return vscode.workspace.applyEdit(edit);
+  } catch {
+    return false;
+  }
 }
 
 async function acceptConflictAndAdvance(
@@ -376,6 +400,9 @@ async function acceptConflictAndAdvance(
       runCommand: async (command) => {
         await vscode.commands.executeCommand(command);
       },
+      resolveByText: resolveConflictByTextEdit,
+      preferBuiltinCommand: builtinMergeConflictAvailable,
+      builtinBothAvailable: builtinMergeConflictBothAvailable,
     },
     args.uri,
     args.conflictId,
@@ -528,6 +555,9 @@ async function runBatchResolution(
       runCommand: async (command: string) => {
         await vscode.commands.executeCommand(command);
       },
+      resolveByText: resolveConflictByTextEdit,
+      preferBuiltinCommand: builtinMergeConflictAvailable,
+      builtinBothAvailable: builtinMergeConflictBothAvailable,
     },
     targets,
     side,
@@ -553,37 +583,246 @@ async function runBatchResolution(
   await vscode.window.showInformationMessage(formatBatchResolutionMessage(side, summary));
 }
 
-export function activate(context: vscode.ExtensionContext): void {
+type ConflictResolverDeps = {
+  store: ConflictStore;
+  navigation: ConflictNavigation;
+  git: GitRepositoryService;
+  tree: ConflictTreeProvider;
+  undoStore: ReturnType<typeof createConflictUndoStore>;
+  syncUndoContext: () => void;
+  getConflictFileText: (uri: string) => string | undefined;
+  refreshConflictUi: (snapshot: ReturnType<ConflictStore["getSnapshot"]>) => Promise<void>;
+  treeView: vscode.TreeView<unknown>;
+  startDecoration: vscode.TextEditorDecorationType;
+  overviewDecoration: vscode.TextEditorDecorationType;
+  statusBar: ConflictStatusBar;
+  fileDecorations: ConflictFileDecorationProvider;
+  fileDecorationChangeEmitter: vscode.EventEmitter<vscode.Uri[] | undefined>;
+  conflictUndoWorkspace: ConflictUndoWorkspace;
+};
+
+function registerConflictSubscriptions(
+  context: vscode.ExtensionContext,
+  deps: ConflictResolverDeps,
+): void {
+  const {
+    store,
+    navigation,
+    git,
+    tree,
+    undoStore,
+    syncUndoContext,
+    treeView,
+    startDecoration,
+    overviewDecoration,
+    statusBar,
+    fileDecorations,
+    fileDecorationChangeEmitter,
+    conflictUndoWorkspace,
+  } = deps;
+
+  context.subscriptions.push(
+    tree,
+    treeView,
+    startDecoration,
+    overviewDecoration,
+    navigation,
+    statusBar,
+    fileDecorations,
+    fileDecorationChangeEmitter,
+    fileDecorations.onDidChange(() => fileDecorationChangeEmitter.fire(undefined)),
+    treeView.onDidChangeVisibility((event) => {
+      if (event.visible) {
+        store.scheduleRefresh("panel-visible");
+      }
+    }),
+    vscode.commands.registerCommand(CONFLICT_TREE_GO_TO_COMMAND, (args: ConflictTreeCommandArguments) => navigation.goTo(args.uri, args.conflictId)),
+    vscode.commands.registerCommand(
+      CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
+      (args: ConflictTreeCommandArguments) =>
+        acceptConflictAndAdvance("current", args, store, navigation, undoStore, syncUndoContext),
+    ),
+    vscode.commands.registerCommand(
+      CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
+      (args: ConflictTreeCommandArguments) =>
+        acceptConflictAndAdvance("incoming", args, store, navigation, undoStore, syncUndoContext),
+    ),
+    vscode.commands.registerCommand(
+      CONFLICT_TREE_ACCEPT_BOTH_COMMAND,
+      (args: ConflictTreeCommandArguments) =>
+        acceptConflictAndAdvance("both", args, store, navigation, undoStore, syncUndoContext),
+    ),
+    vscode.commands.registerCommand("conflictResolver.undoLastAccept", async () => {
+      const entries = undoStore.take();
+      syncUndoContext();
+      if (entries.length === 0) {
+        await vscode.window.showInformationMessage("没有可撤销的采纳操作");
+        return;
+      }
+      const result = await applyConflictUndo(entries, conflictUndoWorkspace);
+      await store.waitForChange();
+      if (result.failed === 0) {
+        await vscode.window.showInformationMessage(`已撤销：${entries[0]?.label ?? ""}`);
+      } else {
+        await vscode.window.showWarningMessage(
+          `已撤销 ${result.restored} 个文件，${result.failed} 个失败`,
+        );
+      }
+    }),
+    vscode.commands.registerCommand("conflictResolver.back", () => navigation.back()),
+    vscode.commands.registerCommand(
+      CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND,
+      async (args: { uri: string }) => git.openMergeEditor(args.uri),
+    ),
+    vscode.commands.registerCommand("conflictResolver.nextConflict", () => navigation.next()),
+    vscode.commands.registerCommand("conflictResolver.previousConflict", () => navigation.previous()),
+    vscode.commands.registerCommand("conflictResolver.nextConflictInFile", () => navigation.nextInFile()),
+    vscode.commands.registerCommand("conflictResolver.previousConflictInFile", () => navigation.previousInFile()),
+    vscode.commands.registerCommand("conflictResolver.openPanel", () => vscode.commands.executeCommand("workbench.view.extension.conflictResolver")),
+    vscode.commands.registerCommand("conflictResolver.rescanCurrentFile", () => store.refresh()),
+    vscode.commands.registerCommand("conflictResolver.openMergeEditor", () => {
+      const uri = vscode.window.activeTextEditor?.document.uri.toString();
+      return uri === undefined ? undefined : git.openMergeEditor(uri);
+    }),
+    vscode.commands.registerCommand("conflictResolver.toggleLockFiles", async () => {
+      const config = vscode.workspace.getConfiguration("conflictResolver");
+      const current = config.get<boolean>("includeLockFiles", false);
+      const next = !current;
+      await config.update("includeLockFiles", next, vscode.ConfigurationTarget.Workspace);
+      await vscode.window.showInformationMessage(
+        next ? "已启用 lock 文件扫描" : "已跳过 lock 文件扫描",
+      );
+    }),
+    vscode.commands.registerCommand("conflictResolver.batchAcceptCurrent", async (args?: unknown) =>
+      runBatchResolution(args, "current", store, tree, undoStore, navigation, syncUndoContext),
+    ),
+    vscode.commands.registerCommand("conflictResolver.batchAcceptIncoming", async (args?: unknown) =>
+      runBatchResolution(args, "incoming", store, tree, undoStore, navigation, syncUndoContext),
+    ),
+    vscode.commands.registerCommand("conflictResolver.batchAcceptBoth", async (args?: unknown) =>
+      runBatchResolution(args, "both", store, tree, undoStore, navigation, syncUndoContext),
+    ),
+    vscode.commands.registerCommand("conflictResolver.treeSelectAll", () => {
+      tree.selectAll();
+    }),
+    vscode.commands.registerCommand("conflictResolver.treeClearSelection", () => {
+      tree.clearSelection();
+    }),
+    vscode.commands.registerCommand(
+      "conflictResolver.treeSelectFile",
+      (args: { uri: string }) => {
+        tree.selectFile(args.uri);
+      },
+    ),
+    vscode.commands.registerCommand("conflictResolver.treeFilterAll", async () => {
+      await updateFilterMode("all");
+    }),
+    vscode.commands.registerCommand("conflictResolver.treeFilterSource", async () => {
+      await updateFilterMode("source");
+    }),
+    vscode.commands.registerCommand("conflictResolver.treeFilterLock", async () => {
+      await updateFilterMode("lock");
+    }),
+    vscode.commands.registerCommand("conflictResolver.treeSearch", async () => {
+      await runTreeSearch(store, navigation, git);
+    }),
+    vscode.workspace.onDidOpenTextDocument(() => store.scheduleRefresh("document-open")),
+    vscode.workspace.onDidCloseTextDocument(() => store.scheduleRefresh("document-close")),
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      const changed = store.applyOpenDocumentText(
+        event.document.uri.toString(),
+        event.document.getText(),
+      );
+      if (
+        changed ||
+        hasLocatedConflictMarkers(event.document.getText()) ||
+        isTrackedConflictDocument(event.document, store.getSnapshot())
+      ) {
+        void deps.refreshConflictUi(store.getSnapshot()).catch(logError);
+      }
+
+      if (isTrackedConflictDocument(event.document, store.getSnapshot())) {
+        store.scheduleRefresh("document-change", { debounceMs: DOCUMENT_CHANGE_DEBOUNCE_MS });
+      }
+    }),
+    vscode.workspace.onDidSaveTextDocument(() => store.scheduleImmediateRefresh("document-save")),
+    vscode.window.onDidChangeActiveTextEditor((editor) => {
+      store.scheduleRefresh("active-editor");
+      void updateScmMenuContext(
+        store.getSnapshot(),
+        editor?.document.uri.toString(),
+      ).catch(logError);
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      store.scheduleRefresh("workspace-folders");
+    }),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration("conflictResolver.includeLockFiles")) {
+        const config = vscode.workspace.getConfiguration("conflictResolver");
+        const include = config.get<boolean>("includeLockFiles", false);
+        const mode = config.get<ConflictFilterMode>("treeFilterMode", "all");
+        store.updateFilter(createConflictFilter({ includeLockFiles: include, mode }));
+        store.scheduleImmediateRefresh("lock-files-toggle");
+      }
+      if (event.affectsConfiguration("conflictResolver.treeFilterMode")) {
+        const config = vscode.workspace.getConfiguration("conflictResolver");
+        const include = config.get<boolean>("includeLockFiles", false);
+        const mode = config.get<ConflictFilterMode>("treeFilterMode", "all");
+        tree.setFilterMode(mode);
+        store.updateFilter(createConflictFilter({ includeLockFiles: include, mode }));
+        store.scheduleImmediateRefresh("filter-mode-toggle");
+      }
+    }),
+    tree.onDidChangeTreeData(() => {
+      void vscode.commands.executeCommand(
+        "setContext",
+        "conflictResolver.hasSelection",
+        tree.getSelection().size > 0,
+      );
+    }),
+    store.onDidChange((snapshot) => {
+      void deps.refreshConflictUi(snapshot).catch(logError);
+    }),
+  );
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const git = new GitRepositoryService({
     runMergeEditorCommand: async (uri) => {
       await vscode.commands.executeCommand("git.openMergeEditor", vscode.Uri.parse(uri));
     },
   });
+
   const store = new ConflictStore({
     documents: createDocumentLoader(),
     git,
-    includeLockFiles: vscode.workspace
-      .getConfiguration("conflictResolver")
-      .get<boolean>("includeLockFiles", false),
-    filter: createConflictFilter({
-      includeLockFiles: vscode.workspace
-        .getConfiguration("conflictResolver")
-        .get<boolean>("includeLockFiles", false),
-      mode: vscode.workspace
-        .getConfiguration("conflictResolver")
-        .get<ConflictFilterMode>("treeFilterMode", "all"),
-    }),
   });
-  const remoteMr = new MergeRequestConflictService({ config: createMergeRequestConfig() });
+
   const tree = new ConflictTreeProvider(
     store,
-    remoteMr,
     (uri) => vscode.Uri.parse(uri),
     {
       getFileText: getConflictFileText,
       createThemeIcon: (id) => new vscode.ThemeIcon(id),
     },
   );
+
+  // Detect built-in Merge Conflict support; if missing, warn and rely on the
+  // text-based fallback for accept operations.
+  void Promise.resolve(vscode.commands.getCommands(true)).then((commands) => {
+    builtinMergeConflictAvailable =
+      commands.includes(ACCEPT_CURRENT_CONFLICT_COMMAND) &&
+      commands.includes(ACCEPT_INCOMING_CONFLICT_COMMAND);
+    builtinMergeConflictBothAvailable = commands.includes(ACCEPT_BOTH_CONFLICT_COMMAND);
+    if (!builtinMergeConflictAvailable) {
+      void vscode.window.showWarningMessage(
+        "内置 Merge Conflict 支持未启用，已回退到文本采纳实现。如需最佳体验，请在扩展面板启用 built-in 'Merge Conflict'。",
+      );
+    }
+  }).catch(() => {
+    // If we cannot enumerate commands, assume the built-in is present.
+  });
+
   const initialFilterMode = vscode.workspace
     .getConfiguration("conflictResolver")
     .get<ConflictFilterMode>("treeFilterMode", "all");
@@ -658,26 +897,12 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   });
 
-  const runMrAction = async (
-    args: ConflictTreeMrActionArguments,
-    action: (repositoryRoot: string) => Promise<string>,
-  ): Promise<void> => {
-    const repositoryRoot = getPrimaryRepositoryRoot();
-    if (repositoryRoot === undefined) {
-      await vscode.window.showWarningMessage("未找到 Git 仓库");
-      return;
-    }
-
-    const message = await action(repositoryRoot);
-    await vscode.window.showInformationMessage(message);
-  };
-
-  const refreshRemoteMr = async (force = false): Promise<void> => {
-    const repositoryRoot = getPrimaryRepositoryRoot();
-    if (repositoryRoot === undefined) {
-      return;
-    }
-    await remoteMr.refresh(repositoryRoot, force);
+  const conflictUndoWorkspace: ConflictUndoWorkspace = {
+    parseUri: (uri) => vscode.Uri.parse(uri),
+    openTextDocument: (uri) => Promise.resolve(vscode.workspace.openTextDocument(uri)),
+    applyEdit: (edit) => Promise.resolve(vscode.workspace.applyEdit(edit)),
+    createWorkspaceEdit: () => new vscode.WorkspaceEdit(),
+    createRange: (start, end) => new vscode.Range(start, end),
   };
 
   const updateConflictBadges = (snapshot: ReturnType<typeof store.getSnapshot>): void => {
@@ -728,231 +953,37 @@ export function activate(context: vscode.ExtensionContext): void {
       snapshot,
       vscode.window.activeTextEditor?.document.uri.toString(),
     );
-    await vscode.commands.executeCommand("git.refresh");
+    // NOTE: intentionally NOT calling `git refresh` here. It forced the built-in
+    // Git extension to re-scan the whole repository on every snapshot change,
+    // and could form a feedback loop with the changes we observe. The extension
+    // maintains its own snapshot; git status refreshes on its own.
   };
 
-  context.subscriptions.push(
+  registerConflictSubscriptions(context, {
+    store,
+    navigation,
+    git,
     tree,
+    undoStore,
+    syncUndoContext,
+    getConflictFileText,
+    refreshConflictUi,
     treeView,
-    remoteMr,
     startDecoration,
     overviewDecoration,
-    navigation,
     statusBar,
     fileDecorations,
     fileDecorationChangeEmitter,
-    fileDecorations.onDidChange(() => fileDecorationChangeEmitter.fire(undefined)),
-    vscode.window.registerFileDecorationProvider({
-      onDidChangeFileDecorations: fileDecorationChangeEmitter.event,
-      provideFileDecoration(uri) {
-        const decoration = fileDecorations.provideFileDecoration(uri.toString());
-        if (decoration === undefined) {
-          return undefined;
-        }
-
-        return {
-          badge: decoration.badge,
-          tooltip: decoration.tooltip,
-          color: new vscode.ThemeColor(decoration.colorId),
-        };
-      },
-    }),
-    vscode.commands.registerCommand(CONFLICT_TREE_GO_TO_COMMAND, (args: ConflictTreeCommandArguments) => navigation.goTo(args.uri, args.conflictId)),
-    vscode.commands.registerCommand(
-      CONFLICT_TREE_ACCEPT_CURRENT_COMMAND,
-      (args: ConflictTreeCommandArguments) =>
-        acceptConflictAndAdvance("current", args, store, navigation, undoStore, syncUndoContext),
-    ),
-    vscode.commands.registerCommand(
-      CONFLICT_TREE_ACCEPT_INCOMING_COMMAND,
-      (args: ConflictTreeCommandArguments) =>
-        acceptConflictAndAdvance("incoming", args, store, navigation, undoStore, syncUndoContext),
-    ),
-    vscode.commands.registerCommand("conflictResolver.undoLastAccept", async () => {
-      const entries = undoStore.take();
-      syncUndoContext();
-      if (entries.length === 0) {
-        await vscode.window.showInformationMessage("没有可撤销的采纳操作");
-        return;
-      }
-      const result = await applyConflictUndo(entries);
-      await store.waitForChange();
-      if (result.failed === 0) {
-        await vscode.window.showInformationMessage(`已撤销：${entries[0]?.label ?? ""}`);
-      } else {
-        await vscode.window.showWarningMessage(
-          `已撤销 ${result.restored} 个文件，${result.failed} 个失败`,
-        );
-      }
-    }),
-    vscode.commands.registerCommand("conflictResolver.back", () => navigation.back()),
-    vscode.commands.registerCommand(
-      CONFLICT_TREE_OPEN_MERGE_EDITOR_COMMAND,
-      async (args: { uri: string }) => git.openMergeEditor(args.uri),
-    ),
-    vscode.commands.registerCommand(CONFLICT_TREE_OPEN_MR_COMMAND, (args: ConflictTreeOpenMrArguments) => vscode.env.openExternal(vscode.Uri.parse(args.webUrl))),
-    vscode.commands.registerCommand(
-      CONFLICT_TREE_FETCH_MR_TARGET_COMMAND,
-      (args: ConflictTreeMrActionArguments) =>
-        runMrAction(args, async (repositoryRoot) => {
-          const result = await fetchMrTargetBranch(git, repositoryRoot, args);
-          return result.message;
-        }),
-    ),
-    vscode.commands.registerCommand(
-      CONFLICT_TREE_PREVIEW_MR_MERGE_COMMAND,
-      async (args: ConflictTreeMrActionArguments) => {
-        const repositoryRoot = getPrimaryRepositoryRoot();
-        if (repositoryRoot === undefined) {
-          await vscode.window.showWarningMessage("未找到 Git 仓库");
-          return;
-        }
-
-        const result = await previewMrMerge(git, repositoryRoot, args);
-        const message = formatMergePreviewMessage(result);
-        if (result.ok && result.conflictCount > 0) {
-          const channel = vscode.window.createOutputChannel("Conflict Resolver");
-          channel.appendLine(message);
-          channel.appendLine("");
-          channel.appendLine(result.output);
-          channel.show(true);
-        }
-        await vscode.window.showInformationMessage(message);
-      },
-    ),
-    vscode.commands.registerCommand(
-      CONFLICT_TREE_OPEN_MR_CONFLICTS_COMMAND,
-      (args: ConflictTreeMrActionArguments) =>
-        vscode.env.openExternal(vscode.Uri.parse(buildMrConflictsUrl(args.webUrl))),
-    ),
-    vscode.commands.registerCommand("conflictResolver.nextConflict", () => navigation.next()),
-    vscode.commands.registerCommand("conflictResolver.previousConflict", () => navigation.previous()),
-    vscode.commands.registerCommand("conflictResolver.nextConflictInFile", () => navigation.nextInFile()),
-    vscode.commands.registerCommand("conflictResolver.previousConflictInFile", () => navigation.previousInFile()),
-    vscode.commands.registerCommand("conflictResolver.openPanel", () => vscode.commands.executeCommand("workbench.view.extension.conflictResolver")),
-    vscode.commands.registerCommand("conflictResolver.rescanCurrentFile", () => store.refresh()),
-    vscode.commands.registerCommand("conflictResolver.openMergeEditor", () => {
-      const uri = vscode.window.activeTextEditor?.document.uri.toString();
-      return uri === undefined ? undefined : git.openMergeEditor(uri);
-    }),
-    vscode.commands.registerCommand("conflictResolver.refreshRemoteMR", () => refreshRemoteMr(true)),
-    vscode.commands.registerCommand("conflictResolver.toggleLockFiles", async () => {
-      const config = vscode.workspace.getConfiguration("conflictResolver");
-      const current = config.get<boolean>("includeLockFiles", false);
-      const next = !current;
-      await config.update("includeLockFiles", next, vscode.ConfigurationTarget.Workspace);
-      await vscode.window.showInformationMessage(
-        next ? "已启用 lock 文件扫描" : "已跳过 lock 文件扫描",
-      );
-    }),
-    vscode.commands.registerCommand("conflictResolver.batchAcceptCurrent", async (args?: unknown) =>
-      runBatchResolution(args, "current", store, tree, undoStore, navigation, syncUndoContext),
-    ),
-    vscode.commands.registerCommand("conflictResolver.batchAcceptIncoming", async (args?: unknown) =>
-      runBatchResolution(args, "incoming", store, tree, undoStore, navigation, syncUndoContext),
-    ),
-    vscode.commands.registerCommand("conflictResolver.treeSelectAll", () => {
-      tree.selectAll();
-    }),
-    vscode.commands.registerCommand("conflictResolver.treeClearSelection", () => {
-      tree.clearSelection();
-    }),
-    vscode.commands.registerCommand(
-      "conflictResolver.treeSelectFile",
-      (args: { uri: string }) => {
-        tree.selectFile(args.uri);
-      },
-    ),
-    vscode.commands.registerCommand("conflictResolver.treeFilterAll", async () => {
-      await updateFilterMode("all");
-    }),
-    vscode.commands.registerCommand("conflictResolver.treeFilterSource", async () => {
-      await updateFilterMode("source");
-    }),
-    vscode.commands.registerCommand("conflictResolver.treeFilterLock", async () => {
-      await updateFilterMode("lock");
-    }),
-    vscode.commands.registerCommand("conflictResolver.treeSearch", async () => {
-      await runTreeSearch(store, navigation, git);
-    }),
-    treeView.onDidChangeVisibility((event) => {
-      if (event.visible) {
-        store.scheduleRefresh("panel-visible");
-      }
-    }),
-    vscode.workspace.onDidOpenTextDocument(() => store.scheduleRefresh("document-open")),
-    vscode.workspace.onDidCloseTextDocument(() => store.scheduleRefresh("document-close")),
-    vscode.workspace.onDidChangeTextDocument((event) => {
-      const changed = store.applyOpenDocumentText(
-        event.document.uri.toString(),
-        event.document.getText(),
-      );
-      if (
-        changed ||
-        hasLocatedConflictMarkers(event.document.getText()) ||
-        isTrackedConflictDocument(event.document, store.getSnapshot())
-      ) {
-        void refreshConflictUi(store.getSnapshot());
-      }
-
-      if (isTrackedConflictDocument(event.document, store.getSnapshot())) {
-        store.scheduleRefresh("document-change", { debounceMs: DOCUMENT_CHANGE_DEBOUNCE_MS });
-      }
-    }),
-    vscode.workspace.onDidSaveTextDocument(() => store.scheduleImmediateRefresh("document-save")),
-    vscode.window.onDidChangeActiveTextEditor((editor) => {
-      store.scheduleRefresh("active-editor");
-      void updateScmMenuContext(
-        store.getSnapshot(),
-        editor?.document.uri.toString(),
-      );
-      const repositoryRoot = getPrimaryRepositoryRoot();
-      if (repositoryRoot !== undefined) {
-        remoteMr.scheduleRefresh(repositoryRoot);
-      }
-    }),
-    vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      store.scheduleRefresh("workspace-folders");
-      void refreshRemoteMr(true);
-    }),
-    vscode.workspace.onDidChangeConfiguration((event) => {
-      if (
-        event.affectsConfiguration("conflictResolver.gitlabUrl") ||
-        event.affectsConfiguration("conflictResolver.gitlabToken")
-      ) {
-        void refreshRemoteMr(true);
-      }
-      if (event.affectsConfiguration("conflictResolver.includeLockFiles")) {
-        const config = vscode.workspace.getConfiguration("conflictResolver");
-        const include = config.get<boolean>("includeLockFiles", false);
-        const mode = config.get<ConflictFilterMode>("treeFilterMode", "all");
-        store.updateFilter(createConflictFilter({ includeLockFiles: include, mode }));
-        store.scheduleImmediateRefresh("lock-files-toggle");
-      }
-      if (event.affectsConfiguration("conflictResolver.treeFilterMode")) {
-        const config = vscode.workspace.getConfiguration("conflictResolver");
-        const include = config.get<boolean>("includeLockFiles", false);
-        const mode = config.get<ConflictFilterMode>("treeFilterMode", "all");
-        tree.setFilterMode(mode);
-        store.updateFilter(createConflictFilter({ includeLockFiles: include, mode }));
-        store.scheduleImmediateRefresh("filter-mode-toggle");
-      }
-    }),
-    tree.onDidChangeTreeData(() => {
-      void vscode.commands.executeCommand(
-        "setContext",
-        "conflictResolver.hasSelection",
-        tree.getSelection().size > 0,
-      );
-    }),
-    store.onDidChange((snapshot) => {
-      void refreshConflictUi(snapshot);
-    }),
-  );
+    conflictUndoWorkspace,
+  });
   syncUndoContext();
 
-  void store.refresh().then((snapshot) => refreshConflictUi(snapshot));
-  void refreshRemoteMr();
+  // Keep module-level handles so deactivate() can cancel in-flight work.
+  activeStore = store;
+
+  void store.refresh().then((snapshot) => refreshConflictUi(snapshot)).catch(logError);
 }
 
-export function deactivate(): void {}
+export function deactivate(): void {
+  activeStore?.dispose();
+}

@@ -12,7 +12,13 @@ export function extractConflictPreview(
   text: string,
   conflict: ConflictBlock,
 ): ConflictPreviewSides {
-  const lines = text.split(/\r?\n/);
+  return extractConflictPreviewFromLines(text.split(/\r?\n/), conflict);
+}
+
+export function extractConflictPreviewFromLines(
+  lines: readonly string[],
+  conflict: ConflictBlock,
+): ConflictPreviewSides {
   return {
     ours: trimPreviewLines(
       lines.slice(conflict.oursRange.startLine, conflict.oursRange.endLine + 1),
@@ -40,13 +46,16 @@ export function formatConflictPreviewTooltip(
   relativePath: string,
   conflict: ConflictBlock,
   text: string | undefined,
+  lines?: readonly string[],
 ): string {
   const header = `${relativePath}\n第 ${conflict.startLine + 1}–${conflict.endLine + 1} 行`;
   if (text === undefined) {
     return header;
   }
 
-  const { ours, theirs } = extractConflictPreview(text, conflict);
+  const { ours, theirs } = lines === undefined
+    ? extractConflictPreview(text, conflict)
+    : extractConflictPreviewFromLines(lines, conflict);
   return [header, "", formatSide("当前 (HEAD)", ours), "", formatSide("传入", theirs)].join(
     "\n",
   );

@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  ACCEPT_BOTH_CONFLICT_COMMAND,
   ACCEPT_CURRENT_CONFLICT_COMMAND,
   ACCEPT_INCOMING_CONFLICT_COMMAND,
   applyBatchConflictResolution,
   applyConflictResolution,
   collectBatchTargets,
   formatBatchResolutionMessage,
+  resolveConflictToText,
 } from "../conflictResolution";
 import type { ConflictBlock, ConflictSnapshot } from "../types";
 
@@ -76,6 +78,44 @@ describe("applyConflictResolution", () => {
 
     expect(runCommand).toHaveBeenCalledWith(ACCEPT_CURRENT_CONFLICT_COMMAND);
   });
+
+  it("uses the built-in accept-both command when available", async () => {
+    const runCommand = vi.fn(async () => {});
+
+    await applyConflictResolution(
+      snapshot,
+      {
+        revealConflict: async () => {},
+        runCommand,
+        builtinBothAvailable: true,
+      },
+      "file:///repo/a.ts",
+      "a",
+      "both",
+    );
+
+    expect(runCommand).toHaveBeenCalledWith(ACCEPT_BOTH_CONFLICT_COMMAND);
+  });
+
+  it("falls back to text resolution for both when built-in both is unavailable", async () => {
+    const resolveByText = vi.fn(async () => true);
+
+    await applyConflictResolution(
+      snapshot,
+      {
+        revealConflict: async () => {},
+        runCommand: async () => {},
+        resolveByText,
+        preferBuiltinCommand: true,
+        builtinBothAvailable: false,
+      },
+      "file:///repo/a.ts",
+      "a",
+      "both",
+    );
+
+    expect(resolveByText).toHaveBeenCalledWith("file:///repo/a.ts", conflict, "both");
+  });
 });
 
 describe("collectBatchTargets", () => {
@@ -126,6 +166,22 @@ describe("applyBatchConflictResolution", () => {
     );
 
     expect(summary).toEqual({ total: 1, resolved: 0, skipped: 1, failed: 0 });
+  });
+});
+
+describe("resolveConflictToText", () => {
+  it("keeps both sides when side is both", () => {
+    const text = ["<<<<<<<", "ours", "=======", "theirs", ">>>>>>>"].join("\n");
+    const bothConflict: ConflictBlock = {
+      id: "both",
+      startLine: 0,
+      separatorLine: 2,
+      endLine: 4,
+      oursRange: { startLine: 1, endLine: 1 },
+      theirsRange: { startLine: 3, endLine: 3 },
+    };
+    const result = resolveConflictToText(text, bothConflict, "both");
+    expect(result).toBe(["ours", "theirs"].join("\n"));
   });
 });
 

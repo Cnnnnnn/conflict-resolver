@@ -1,4 +1,5 @@
 import type { ConflictSnapshot } from "./types";
+import { isGitOnlyUnresolved } from "./conflictPredicates";
 import { toConflictFileKey } from "./conflictScmMenu";
 
 export type ConflictFileDecoration = {
@@ -53,7 +54,7 @@ export function buildConflictFileDecorations(
       continue;
     }
 
-    if (file.gitUnmerged && file.parseError !== undefined) {
+    if (isGitOnlyUnresolved(file)) {
       decorations.set(key, {
         badge: "!",
         tooltip: `${file.relativePath}\n${formatGitOnlyConflictLabel()}`,

@@ -3,12 +3,27 @@ import type { ConflictBlock, ConflictSnapshot } from "./types";
 
 export const ACCEPT_CURRENT_CONFLICT_COMMAND = "merge-conflict.accept.current";
 export const ACCEPT_INCOMING_CONFLICT_COMMAND = "merge-conflict.accept.incoming";
+export const ACCEPT_BOTH_CONFLICT_COMMAND = "merge-conflict.accept.both";
 
-export type ConflictResolutionSide = "current" | "incoming";
+export type ConflictResolutionSide = "current" | "incoming" | "both";
 
 export type ConflictResolutionCallbacks = {
   revealConflict(uri: string, conflict: ConflictBlock): Promise<void>;
   runCommand(command: string): Promise<void>;
+  /**
+   * Optional text-based fallback used when the built-in `merge-conflict.accept.*`
+   * command is unavailable (e.g. the built-in Merge Conflict support is disabled
+   * in Cursor). It must remove the conflict markers for `conflict` and keep the
+   * chosen side, returning true if the edit was applied.
+   */
+  resolveByText?(uri: string, conflict: ConflictBlock, side: ConflictResolutionSide): Promise<boolean>;
+  /**
+   * When false, the text fallback is used directly instead of the built-in
+   * accept command. Defaults to true.
+   */
+  preferBuiltinCommand?: boolean;
+  /** When side is `both`, use built-in `merge-conflict.accept.both`. Defaults to false. */
+  builtinBothAvailable?: boolean;
 };
 
 function findLocatedConflict(
@@ -32,6 +47,21 @@ function findLocatedConflict(
   return { uri: file.uri, conflict };
 }
 
+function commandForSide(side: ConflictResolutionSide): string {
+  switch (side) {
+    case "current":
+      return ACCEPT_CURRENT_CONFLICT_COMMAND;
+    case "incoming":
+      return ACCEPT_INCOMING_CONFLICT_COMMAND;
+    case "both":
+      return ACCEPT_BOTH_CONFLICT_COMMAND;
+    default: {
+      const _exhaustive: never = side;
+      return _exhaustive;
+    }
+  }
+}
+
 export async function applyConflictResolution(
   snapshot: ConflictSnapshot,
   callbacks: ConflictResolutionCallbacks,
@@ -45,12 +75,45 @@ export async function applyConflictResolution(
   }
 
   await callbacks.revealConflict(located.uri, located.conflict);
-  await callbacks.runCommand(
-    side === "current"
-      ? ACCEPT_CURRENT_CONFLICT_COMMAND
-      : ACCEPT_INCOMING_CONFLICT_COMMAND,
-  );
+
+  const preferBuiltin = callbacks.preferBuiltinCommand ?? true;
+  const useBuiltin =
+    preferBuiltin &&
+    (side !== "both" || (callbacks.builtinBothAvailable ?? false));
+
+  if (callbacks.resolveByText !== undefined && !useBuiltin) {
+    const ok = await callbacks.resolveByText(located.uri, located.conflict, side);
+    if (!ok && preferBuiltin && side !== "both") {
+      await callbacks.runCommand(commandForSide(side));
+    }
+    return true;
+  }
+
+  await callbacks.runCommand(commandForSide(side));
   return true;
+}
+
+/**
+ * Remove the conflict markers for `conflict` from `text` and keep the chosen
+ * side. Pure and testable; the caller applies the resulting text via a document
+ * edit. Works on both `\n` and `\r\n` line endings (line strings keep their
+ * trailing `\r` so rejoining is lossless).
+ */
+export function resolveConflictToText(
+  text: string,
+  conflict: ConflictBlock,
+  side: ConflictResolutionSide,
+): string {
+  const lines = text.split("\n");
+  const startLine = conflict.startLine;
+  const endLine = conflict.endLine;
+  const ours = lines.slice(conflict.oursRange.startLine, conflict.oursRange.endLine + 1);
+  const theirs = lines.slice(conflict.theirsRange.startLine, conflict.theirsRange.endLine + 1);
+  const kept =
+    side === "current" ? ours : side === "incoming" ? theirs : [...ours, ...theirs];
+  const before = lines.slice(0, startLine);
+  const after = lines.slice(endLine + 1);
+  return [...before, ...kept, ...after].join("\n");
 }
 
 export type BatchResolutionTarget = { uri: string; conflictId: string };
@@ -127,7 +190,8 @@ export function formatBatchResolutionMessage(
   side: ConflictResolutionSide,
   summary: BatchResolutionSummary,
 ): string {
-  const sideLabel = side === "current" ? "采用当前" : "采用传入";
+  const sideLabel =
+    side === "current" ? "采用当前" : side === "incoming" ? "采用传入" : "保留双方";
   if (summary.failed === 0) {
     return `${sideLabel}：处理 ${summary.resolved}/${summary.total}，跳过 ${summary.skipped}`;
   }

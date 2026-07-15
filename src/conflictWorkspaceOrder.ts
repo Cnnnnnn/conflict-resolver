@@ -1,4 +1,5 @@
 import { canonicalizeConflictUri } from "./conflictScmMenu";
+import { compareConflicts, compareFiles } from "./conflictCompare";
 import type { ConflictBlock, ConflictFile, ConflictSnapshot } from "./types";
 
 export type WorkspaceConflictRef = {
@@ -7,42 +8,6 @@ export type WorkspaceConflictRef = {
   startLine: number;
   relativePath: string;
 };
-
-function compareFiles(left: ConflictFile, right: ConflictFile): number {
-  if (left.relativePath < right.relativePath) {
-    return -1;
-  }
-
-  if (left.relativePath > right.relativePath) {
-    return 1;
-  }
-
-  if (left.uri < right.uri) {
-    return -1;
-  }
-
-  if (left.uri > right.uri) {
-    return 1;
-  }
-
-  return 0;
-}
-
-function compareConflicts(left: ConflictBlock, right: ConflictBlock): number {
-  if (left.startLine !== right.startLine) {
-    return left.startLine - right.startLine;
-  }
-
-  if (left.id < right.id) {
-    return -1;
-  }
-
-  if (left.id > right.id) {
-    return 1;
-  }
-
-  return 0;
-}
 
 export function buildWorkspaceConflictOrder(
   snapshot: ConflictSnapshot,

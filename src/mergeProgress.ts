@@ -1,3 +1,4 @@
+import { isGitOnlyUnresolved } from "./conflictPredicates";
 import type { ConflictSnapshot } from "./types";
 
 export type MergeProgress = {
@@ -12,12 +13,7 @@ export function getMergeProgress(snapshot: ConflictSnapshot): MergeProgress {
   const locatedFiles = snapshot.files.filter(
     (file) => file.locatedConflicts.length > 0,
   );
-  const gitOnlyFiles = snapshot.files.filter(
-    (file) =>
-      file.gitUnmerged &&
-      file.locatedConflicts.length === 0 &&
-      file.parseError !== undefined,
-  );
+  const gitOnlyFiles = snapshot.files.filter((file) => isGitOnlyUnresolved(file));
 
   return {
     unmergedFileCount: unmergedFiles.length,

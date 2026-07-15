@@ -1,6 +1,7 @@
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { resolve } from "node:path";
 
+import { isGitOnlyUnresolved } from "./conflictPredicates";
 import type { ConflictBlock, ConflictFile, ConflictSnapshot } from "./types";
 
 export type ScmConflictPickItem = {
@@ -43,7 +44,7 @@ export function toConflictFileKey(uri: string): string {
       return resolve(fileURLToPath(uri));
     }
   } catch {
-    // ponytail: non-file URIs fall through to best-effort normalization
+    // non-file URIs fall through to best-effort normalization
   }
 
   try {
@@ -145,12 +146,7 @@ export function getMergeConflictMenuContext(snapshot: ConflictSnapshot): {
 } {
   return {
     hasMergeConflicts: snapshot.files.length > 0,
-    hasGitOnlyMergeFiles: snapshot.files.some(
-      (file) =>
-        file.gitUnmerged &&
-        file.locatedConflicts.length === 0 &&
-        file.parseError !== undefined,
-    ),
+    hasGitOnlyMergeFiles: snapshot.files.some((file) => isGitOnlyUnresolved(file)),
   };
 }
 
@@ -166,10 +162,7 @@ export function buildScmEditorSlotContext(
     editorUri === undefined ? undefined : findConflictFile(snapshot, editorUri);
   const locatedCount = file?.locatedConflicts.length ?? 0;
   const gitOnly =
-    file !== undefined &&
-    file.gitUnmerged &&
-    file.locatedConflicts.length === 0 &&
-    file.parseError !== undefined;
+    file !== undefined && isGitOnlyUnresolved(file);
 
   const context: Record<string, boolean | number | string> = {
     "conflictResolver.scmEditorResourcePath": editorPath,

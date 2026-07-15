@@ -3,7 +3,7 @@
   "displayName": "Conflict Resolver",
   "description": "VS Code and Cursor extension for locating and navigating Git merge conflicts.",
   "icon": "resources/icon.png",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "publisher": "shienLiang",
   "license": "MIT",
   "author": {
@@ -22,7 +22,6 @@
     "merge",
     "conflict",
     "scm",
-    "gitlab",
     "navigation"
   ],
   "galleryBanner": {
@@ -30,7 +29,7 @@
     "theme": "dark"
   },
   "engines": {
-    "vscode": "^1.100.0"
+    "vscode": "^1.85.0"
   },
   "categories": [
     "SCM Providers",
@@ -77,26 +76,6 @@
         "command": "conflictResolver.toggleLockFiles",
         "title": "Conflict Resolver: Toggle Lock Files",
         "icon": "$(files-skip)"
-      },
-      {
-        "command": "conflictResolver.refreshRemoteMR",
-        "title": "Conflict Resolver: Refresh Remote MR"
-      },
-      {
-        "command": "conflictResolver.openMergeRequest",
-        "title": "Conflict Resolver: Open Merge Request"
-      },
-      {
-        "command": "conflictResolver.fetchMrTargetBranch",
-        "title": "Conflict Resolver: Fetch MR Target Branch"
-      },
-      {
-        "command": "conflictResolver.previewMrMerge",
-        "title": "Conflict Resolver: Preview MR Merge"
-      },
-      {
-        "command": "conflictResolver.openMrConflicts",
-        "title": "Conflict Resolver: Open MR Conflicts Page"
       },
       {
         "command": "conflictResolver.scmPickConflict",
@@ -219,6 +198,11 @@
         "icon": "$(arrow-right)"
       },
       {
+        "command": "conflictResolver.batchAcceptBoth",
+        "title": "Conflict Resolver: Accept Selected (Both)",
+        "icon": "$(git-compare)"
+      },
+      {
         "command": "conflictResolver.treeSelectAll",
         "title": "Conflict Resolver: Select All Conflicts",
         "icon": "$(check-all)"
@@ -338,14 +322,19 @@
           "group": "navigation@6"
         },
         {
+          "command": "conflictResolver.batchAcceptBoth",
+          "when": "view == conflictResolver.tree && conflictResolver.hasSelection",
+          "group": "navigation@7"
+        },
+        {
           "command": "conflictResolver.back",
           "when": "view == conflictResolver.tree && conflictResolver.hasUndo",
-          "group": "navigation@7"
+          "group": "navigation@8"
         },
         {
           "command": "conflictResolver.undoLastAccept",
           "when": "view == conflictResolver.tree && conflictResolver.hasUndo",
-          "group": "navigation@8"
+          "group": "navigation@9"
         }
       ],
       "view/item/context": [
@@ -356,6 +345,11 @@
         },
         {
           "command": "conflictResolver.batchAcceptIncoming",
+          "when": "view == conflictResolver.tree && viewItem == conflictTreeConflict",
+          "group": "1_accept"
+        },
+        {
+          "command": "conflictResolver.batchAcceptBoth",
           "when": "view == conflictResolver.tree && viewItem == conflictTreeConflict",
           "group": "1_accept"
         },
@@ -401,16 +395,6 @@
     "configuration": {
       "title": "Conflict Resolver",
       "properties": {
-        "conflictResolver.gitlabUrl": {
-          "type": "string",
-          "default": "https://gitlab.com",
-          "description": "GitLab instance URL"
-        },
-        "conflictResolver.gitlabToken": {
-          "type": "string",
-          "default": "",
-          "description": "GitLab API token; prefer environment variable GITLAB_TOKEN"
-        },
         "conflictResolver.includeLockFiles": {
           "type": "boolean",
           "default": false,
@@ -452,7 +436,7 @@
   },
   "devDependencies": {
     "@types/node": "18.17.19",
-    "@types/vscode": "1.100.0",
+    "@types/vscode": "1.85.0",
     "typescript": "5.8.3",
     "vite": "6.3.5",
     "vitest": "3.2.4"

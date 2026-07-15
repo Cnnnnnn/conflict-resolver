@@ -1,10 +1,12 @@
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { parseConflictMarkers } from "./conflictParser";
+import { compareFiles } from "./conflictCompare";
 import type { ConflictFilter } from "./conflictFilter";
 import { createConflictFilter } from "./conflictFilter";
+import { isResolvedGitFile } from "./conflictPredicates";
 import { hasLocatedConflictMarkers, toConflictFileKey } from "./conflictScmMenu";
 import { GitRepositoryService } from "./gitRepositoryService";
 import type { ConflictBlock, ConflictFile, ConflictSnapshot, GitUnmergedFile } from "./types";
@@ -49,6 +51,10 @@ export type ConflictStoreOptions = {
 };
 
 const DEFAULT_DEBOUNCE_MS = 100;
+
+// Skip reading files larger than this from disk to avoid blocking the UI thread
+// on enormous generated/unmerged files; their git state is still reflected.
+const MAX_DISK_READ_BYTES = 5 * 1024 * 1024;
 
 const EMPTY_SNAPSHOT: ConflictSnapshot = {
   files: [],
@@ -136,11 +142,11 @@ function shouldOmitResolvedGitFile(
   locatedConflicts: readonly ConflictBlock[],
   parseError: string | undefined,
 ): boolean {
-  return (
-    gitUnmerged &&
-    locatedConflicts.length === 0 &&
-    parseError === undefined
-  );
+  return isResolvedGitFile({
+    gitUnmerged,
+    locatedConflicts,
+    parseError,
+  } as unknown as ConflictFile);
 }
 
 function toFileSystemPath(uri: string): string | undefined {
@@ -181,26 +187,6 @@ function toRepositoryRelativePath(
   } catch {
     return undefined;
   }
-}
-
-function compareFiles(left: ConflictFile, right: ConflictFile): number {
-  if (left.relativePath < right.relativePath) {
-    return -1;
-  }
-
-  if (left.relativePath > right.relativePath) {
-    return 1;
-  }
-
-  if (left.uri < right.uri) {
-    return -1;
-  }
-
-  if (left.uri > right.uri) {
-    return 1;
-  }
-
-  return 0;
 }
 
 function findContainingRepositoryRoot(
@@ -247,6 +233,8 @@ export class ConflictStore {
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private snapshot: ConflictSnapshot = EMPTY_SNAPSHOT;
   private readonly recentlyOmittedFiles = new Map<string, ConflictFile>();
+  private revision = 0;
+  private disposed = false;
 
   constructor(options: ConflictStoreOptions = {}) {
     this.clearTimer = options.clearTimeout ?? clearTimeout;
@@ -408,6 +396,10 @@ export class ConflictStore {
   }
 
   private publishSnapshot(files: readonly ConflictFile[]): void {
+    // Bump the revision so an in-flight rebuild triggered by scheduleRefresh
+    // can detect that a newer (optimistic) snapshot already landed and avoid
+    // overwriting it. See runRefreshLoop.
+    this.revision += 1;
     this.snapshot = finalizeSnapshot(files, this.now);
     void this.emitDidChange(this.snapshot);
   }
@@ -449,13 +441,26 @@ export class ConflictStore {
   private async runRefreshLoop(): Promise<ConflictSnapshot> {
     do {
       this.pendingRefresh = false;
+      const baseRevision = this.revision;
       const nextSnapshot = await this.buildSnapshot();
+      // If an optimistic update (applyOpenDocumentText) landed while we were
+      // building, keep that newer snapshot instead of clobbering it with a
+      // potentially stale rebuild.
+      if (this.revision !== baseRevision) {
+        continue;
+      }
       this.snapshot = nextSnapshot;
       this.syncRecentlyOmittedFiles();
       await this.emitDidChange(nextSnapshot);
     } while (this.pendingRefresh);
 
     return this.snapshot;
+  }
+
+  dispose(): void {
+    this.disposed = true;
+    this.clearScheduledRefresh();
+    this.listeners.clear();
   }
 
   private async emitDidChange(snapshot: ConflictSnapshot): Promise<void> {
@@ -465,6 +470,9 @@ export class ConflictStore {
   }
 
   private async buildSnapshot(): Promise<ConflictSnapshot> {
+    if (this.disposed) {
+      return this.snapshot;
+    }
     const openDocuments = [...await this.documents.getOpenDocuments()];
     const repositoryRoots = new Set(
       [...await this.documents.getRepositoryRoots()].map((repositoryRoot) =>
@@ -548,11 +556,7 @@ export class ConflictStore {
       .filter((file) => this.filter.isIncluded(file.relativePath) && this.filter.matchesMode(file.relativePath))
       .filter(
         (file) =>
-          !shouldOmitResolvedGitFile(
-            file.gitUnmerged,
-            file.locatedConflicts,
-            file.parseError,
-          ),
+          !isResolvedGitFile(file),
       );
 
     return finalizeSnapshot(snapshotFiles, this.now);
@@ -632,7 +636,7 @@ export class ConflictStore {
       !this.filter.isIncluded(existing.file.relativePath) &&
       existing.file.locatedConflicts.length > 0
     ) {
-      // ponytail: file became filtered; keep cached so toggling back restores it
+      // file became filtered; keep the cached entry so toggling the filter back restores it
       this.recentlyOmittedFiles.set(key, {
         ...existing.file,
         locatedConflicts,
@@ -687,6 +691,15 @@ export class ConflictStore {
       if (text !== undefined) {
         return text;
       }
+    }
+
+    try {
+      const fileStat = await stat(fileURLToPath(uri));
+      if (fileStat.size > MAX_DISK_READ_BYTES) {
+        return "";
+      }
+    } catch {
+      // fall through to a direct read; readFile will surface a real error
     }
 
     return readFile(fileURLToPath(uri), "utf8");

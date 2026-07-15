@@ -149,7 +149,7 @@ export class ConflictStatusBar {
   private activeLine: number | undefined;
 
   constructor(private readonly options: ConflictStatusBarOptions) {
-    // ponytail: VS Code 左对齐状态栏 priority 越大越靠左
+    // VS Code left-aligned status bar: a larger priority places the item further left.
     this.prevItem = options.statusBar.createStatusBarItem(102);
     this.labelItem = options.statusBar.createStatusBarItem(101);
     this.nextItem = options.statusBar.createStatusBarItem(100);
