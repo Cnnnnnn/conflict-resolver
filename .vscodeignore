@@ -2,6 +2,7 @@ src/**
 tsconfig.json
 vitest.config.ts
 .superpowers/**
+.workbuddy/**
 docs/**
 node_modules/**
 dist/test/**
