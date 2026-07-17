@@ -121,6 +121,12 @@ export type ConflictTreeTextProvider = (uri: string) => string | undefined;
 type ConflictTreeProviderOptions = {
   getFileText?: ConflictTreeTextProvider;
   createThemeIcon?: ThemeIconFactory;
+  /**
+   * Wall-clock used by the stale badge. Defaults to Date.now. Tests
+   * inject a fixed clock so generatedAt can stay at a tiny sentinel
+   * without the badge flipping into stale mode.
+   */
+  now?: () => number;
 };
 
 export type ConflictTreeSelection = ReadonlySet<string>;
@@ -251,21 +257,54 @@ function getGitOnlyFiles(snapshot: ConflictSnapshot): ConflictFile[] {
     .sort(compareFiles);
 }
 
+// Stale badge threshold: after this many ms since snapshot.generatedAt
+// the tree header flips into "stale" mode. Picked to match what feels
+// like "the panel is showing data that's no longer current"; 60s is
+// long enough to survive a brief idle moment but short enough that a
+// real editing session will trigger it.
+const STALE_THRESHOLD_MS = 60_000;
+
+export type TreeFreshness = {
+  description: string;
+  stale: boolean;
+};
+
+export function formatTreeFreshness(
+  generatedAt: number,
+  now: number = Date.now(),
+): TreeFreshness {
+  if (generatedAt === 0) {
+    return { description: "", stale: false };
+  }
+  const deltaMs = Math.max(0, now - generatedAt);
+  if (deltaMs < 1_500) {
+    return { description: "刚刚", stale: false };
+  }
+  const seconds = Math.floor(deltaMs / 1000);
+  const description = seconds < 60 ? `${seconds} 秒前` : `${Math.floor(seconds / 60)} 分钟前`;
+  return { description, stale: deltaMs >= STALE_THRESHOLD_MS };
+}
+
 function createGroupItem(
   groupKey: ConflictTreeGroupKey,
   count: number,
+  freshness: TreeFreshness,
 ): ConflictTreeGroupItem {
   const labels: Record<ConflictTreeGroupKey, string> = {
     located: `可定位冲突：${count}`,
     gitOnly: `Git 未解决但位置未知：${count}`,
   };
-
+  const stalePrefix = freshness.stale ? "$(clock) " : "";
   return {
     id: `group:${groupKey}`,
     kind: "group",
     groupKey,
     contextValue: `conflictTreeGroup:${groupKey}`,
-    label: labels[groupKey],
+    label: `${stalePrefix}${labels[groupKey]}`,
+    description: freshness.description,
+    tooltip: freshness.stale
+      ? `${labels[groupKey]}\n${freshness.description} — 按 Ctrl+Shift+R 重新扫描`
+      : labels[groupKey],
     collapsibleState: vscode.TreeItemCollapsibleState.Expanded,
   };
 }
@@ -417,6 +456,8 @@ export class ConflictTreeProvider
   private readonly storeSubscription: ConflictStoreDisposable;
   private readonly getFileText?: ConflictTreeTextProvider;
   private readonly createThemeIcon?: ThemeIconFactory;
+  private readonly freshnessTimer: ReturnType<typeof setInterval> | undefined;
+  private readonly now: () => number;
 
   readonly onDidChangeTreeData = this.changeEmitter.event;
 
@@ -427,13 +468,23 @@ export class ConflictTreeProvider
   ) {
     this.getFileText = options?.getFileText;
     this.createThemeIcon = options?.createThemeIcon;
+    this.now = options?.now ?? (() => Date.now());
     this.snapshot = store.getSnapshot();
     this.storeSubscription = store.onDidChange(this.handleStoreChange);
+    // Re-emit every 5s so the "刚刚 / N秒前 / 已过时" badge on the group
+    // header visibly ages; firing an undefined element triggers VS Code
+    // to re-fetch getTreeItem/getChildren without us rebuilding state.
+    this.freshnessTimer = setInterval(() => {
+      this.changeEmitter.fire(undefined);
+    }, 5_000);
   }
 
   dispose(): void {
     this.storeSubscription.dispose();
     this.changeEmitter.dispose();
+    if (this.freshnessTimer !== undefined) {
+      clearInterval(this.freshnessTimer);
+    }
   }
 
   setWorkState(state: ConflictWorkState): void {
@@ -574,8 +625,8 @@ export class ConflictTreeProvider
       }
 
       const groups: ConflictTreeGroupItem[] = [
-        createGroupItem("located", locatedCount),
-        createGroupItem("gitOnly", gitOnlyFiles.length),
+        createGroupItem("located", locatedCount, formatTreeFreshness(this.snapshot.generatedAt, this.now())),
+        createGroupItem("gitOnly", gitOnlyFiles.length, formatTreeFreshness(this.snapshot.generatedAt, this.now())),
       ];
 
       return [...items, ...groups];

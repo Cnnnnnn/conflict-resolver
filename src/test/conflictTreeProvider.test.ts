@@ -31,7 +31,7 @@ function createSnapshot(
     gitOnlyCount: files.filter(
       (file) => file.gitUnmerged && file.locatedConflicts.length === 0,
     ).length,
-    generatedAt: 1,
+    generatedAt: 1_000_000_000_000,
     ...overrides,
   };
 }
@@ -68,6 +68,9 @@ class FakeConflictStore {
 }
 
 describe("ConflictTreeProvider", () => {
+  const fixedNow = 1_000_000_000_000;
+  const providerOptions = { now: () => fixedNow };
+
   it("renders deterministic groups, files, and conflict command payloads", async () => {
     const store = new FakeConflictStore(
       createSnapshot([
@@ -130,7 +133,7 @@ describe("ConflictTreeProvider", () => {
       ]),
     );
 
-    const provider = new ConflictTreeProvider(store);
+    const provider = new ConflictTreeProvider(store, undefined, providerOptions);
 
     const rootItems = await provider.getChildren();
     expect(rootItems).toHaveLength(3);
@@ -196,6 +199,7 @@ describe("ConflictTreeProvider", () => {
       command: CONFLICT_TREE_ACCEPT_BOTH_COMMAND,
       arguments: [{ uri: zFile.uri, conflictId: "z-early" }],
     });
+    provider.dispose();
   });
 
   it("shows preview tooltip and completion state", async () => {
@@ -215,6 +219,7 @@ describe("ConflictTreeProvider", () => {
     );
     const provider = new ConflictTreeProvider(store, undefined, {
       getFileText: () => "<<<<<<<\nours\n=======\ntheirs\n>>>>>>>",
+      ...providerOptions,
     });
     provider.setWorkState({ hadLocatedConflicts: true, hadUnmergedFiles: true });
 
@@ -248,6 +253,7 @@ describe("ConflictTreeProvider", () => {
     );
     const activeProvider = new ConflictTreeProvider(activeStore, undefined, {
       getFileText: () => "<<<<<<<\nours\n=======\ntheirs\n>>>>>>>",
+      ...providerOptions,
     });
     const activeRootItems = await activeProvider.getChildren();
     const locatedGroup = activeRootItems.find((item) =>
@@ -257,6 +263,8 @@ describe("ConflictTreeProvider", () => {
     const [conflictItem] = await activeProvider.getChildren(file as ConflictTreeFileItem);
     expect(String(conflictItem.tooltip)).toContain("ours");
     expect(String(conflictItem.tooltip)).toContain("theirs");
+    provider.dispose();
+    activeProvider.dispose();
   });
 
   it("refreshes the view when the store publishes a new snapshot", async () => {
@@ -288,7 +296,7 @@ describe("ConflictTreeProvider", () => {
       },
     ]);
     const store = new FakeConflictStore(initialSnapshot);
-    const provider = new ConflictTreeProvider(store);
+    const provider = new ConflictTreeProvider(store, undefined, providerOptions);
     const onDidChangeTreeData = vi.fn();
 
     provider.onDidChangeTreeData(onDidChangeTreeData);
@@ -306,5 +314,6 @@ describe("ConflictTreeProvider", () => {
       "beta.ts",
     ]);
     expect(await provider.getChildren(gitOnlyGroup as ConflictTreeGroupItem)).toEqual([]);
+    provider.dispose();
   });
 });
