@@ -6,6 +6,7 @@ vitest.config.ts
 docs/**
 node_modules/**
 dist/test/**
+scripts/**
 **/*.map
 resources/screenshots/**
 .token-savior-cache.json
