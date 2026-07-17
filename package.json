@@ -430,6 +430,18 @@
           "group": "9_conflictResolver@1"
         }
       ],
+      "scm/title": [
+        {
+          "command": "conflictResolver.continueScenario",
+          "when": "scmProvider == git && conflictResolver.scenarioInProgress",
+          "group": "navigation@1"
+        },
+        {
+          "command": "conflictResolver.stageAllResolved",
+          "when": "scmProvider == git && conflictResolver.markersCleared",
+          "group": "navigation@2"
+        }
+      ],
       "conflictResolver.conflicts": [
         {
           "command": "conflictResolver.scmPickConflict",
