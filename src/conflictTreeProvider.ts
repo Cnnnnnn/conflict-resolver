@@ -309,6 +309,14 @@ function createGroupItem(
   };
 }
 
+function pickFileIconId(relativePath: string): string {
+  if (isLockFilePath(relativePath)) return "lock";
+  if (SOURCE_FILE_PATTERN.test(relativePath)) return "file-code";
+  return "file";
+}
+
+const SOURCE_FILE_PATTERN = /\.(?:ts|tsx|js|jsx|mjs|cjs|py|go|rs|java|kt|swift|scala|c|cc|cpp|cxx|h|hh|hpp|rb|php|cs|sh|bash|zsh|sql)$/i;
+
 function createFileItem(
   file: ConflictFile,
   groupKey: "located" | "gitOnly",
@@ -328,6 +336,7 @@ function createFileItem(
     relativePath: file.relativePath,
     conflictCount,
     gitUnmerged: file.gitUnmerged,
+    iconPath: createThemeIcon?.(pickFileIconId(file.relativePath)),
     description:
       groupKey === "located"
         ? formatLocatedConflictLabel(conflictCount)

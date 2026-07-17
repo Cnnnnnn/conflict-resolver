@@ -67,6 +67,15 @@ describe("ConflictTreeProvider", () => {
   const fixedNow = 1_000_000_000_000;
   const providerOptions = { now: () => fixedNow };
 
+  function makeIconSpy() {
+    const calls: string[] = [];
+    const createThemeIcon = (id: string) => {
+      calls.push(id);
+      return { id } as unknown as import("vscode").ThemeIcon;
+    };
+    return { createThemeIcon, calls };
+  }
+
   it("renders deterministic groups, files, and conflict command payloads", async () => {
     const store = new FakeConflictStore(
       createSnapshot([
@@ -195,6 +204,71 @@ describe("ConflictTreeProvider", () => {
       command: CONFLICT_TREE_ACCEPT_BOTH_COMMAND,
       arguments: [{ uri: zFile.uri, conflictId: "z-early" }],
     });
+    provider.dispose();
+  });
+
+  it("picks file icons for lock / source / generic files", async () => {
+    const store = new FakeConflictStore(
+      createSnapshot([
+        {
+          uri: toUri("/repo/pnpm-lock.yaml"),
+          repositoryRoot: "/repo",
+          relativePath: "pnpm-lock.yaml",
+          gitUnmerged: true,
+          locatedConflicts: [],
+        },
+        {
+          uri: toUri("/repo/src/util.ts"),
+          repositoryRoot: "/repo",
+          relativePath: "src/util.ts",
+          gitUnmerged: true,
+          locatedConflicts: [
+            {
+              id: "u",
+              startLine: 0,
+              separatorLine: 2,
+              endLine: 4,
+              oursRange: { startLine: 1, endLine: 1 },
+              theirsRange: { startLine: 3, endLine: 3 },
+            },
+          ],
+        },
+        {
+          uri: toUri("/repo/notes.md"),
+          repositoryRoot: "/repo",
+          relativePath: "notes.md",
+          gitUnmerged: true,
+          locatedConflicts: [],
+        },
+      ]),
+    );
+    const { createThemeIcon, calls } = makeIconSpy();
+    const provider = new ConflictTreeProvider(store, undefined, {
+      ...providerOptions,
+      createThemeIcon,
+    });
+
+    const rootItems = await provider.getChildren();
+    const locatedGroup = rootItems.find((item) =>
+      String(item.label).startsWith("可定位冲突"),
+    ) as ConflictTreeGroupItem;
+    const gitOnlyGroup = rootItems.find((item) =>
+      String(item.label).startsWith("Git 未解决但位置未知"),
+    ) as ConflictTreeGroupItem;
+
+    const locatedFiles = (await provider.getChildren(locatedGroup)) as ConflictTreeFileItem[];
+    const gitOnlyFiles = (await provider.getChildren(gitOnlyGroup)) as ConflictTreeFileItem[];
+
+    expect(locatedFiles.map((file) => (file.iconPath as { id: string }).id)).toEqual([
+      "file-code",
+    ]);
+    expect(gitOnlyFiles.map((file) => (file.iconPath as { id: string }).id)).toEqual([
+      "file",
+      "lock",
+    ]);
+    expect(calls).toContain("lock");
+    expect(calls).toContain("file-code");
+    expect(calls).toContain("file");
     provider.dispose();
   });
 
