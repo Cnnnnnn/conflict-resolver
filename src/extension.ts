@@ -22,6 +22,7 @@ import {
   updateConflictWorkState,
 } from "./conflictCompletion";
 import { createConflictFilter, isLockFilePath, type ConflictFilterMode } from "./conflictFilter";
+import { filterConflictCommands } from "./conflictCommandPalette";
 import {
   createConflictDiffPreviewer,
   fetchConflictSides,
@@ -555,6 +556,55 @@ async function runTreeSearch(
   await gotoFirst(chosen.file);
 }
 
+async function runConflictCommandPalette(
+  store: ConflictStore,
+  undoStore: ReturnType<typeof createConflictUndoStore>,
+  activeScenario: MergeScenario,
+): Promise<void> {
+  const snapshot = store.getSnapshot();
+  const markersCleared =
+    snapshot.locatedCount === 0 &&
+    snapshot.files.some((file) => file.gitUnmerged);
+  const baseItems = filterConflictCommands({
+    context: {
+      snapshot,
+      hasUndo: undoStore.size() > 0,
+      scenarioInProgress: activeScenario.inProgress,
+      markersCleared,
+    },
+  });
+
+  if (baseItems.length === 0) {
+    await vscode.window.showInformationMessage("当前状态下没有可用的冲突命令");
+    return;
+  }
+
+  const items: vscode.QuickPickItem[] = baseItems.map((entry) => ({
+    label: entry.label,
+    description: entry.detail,
+  }));
+  const itemToCommand = new Map<vscode.QuickPickItem, string>();
+  baseItems.forEach((entry, index) => {
+    const item = items[index];
+    if (item !== undefined) {
+      itemToCommand.set(item, entry.command);
+    }
+  });
+
+  const picked = await vscode.window.showQuickPick(items, {
+    title: "Conflict Resolver 命令",
+    placeHolder: "输入关键字筛选 (支持中文/拼音子序列)",
+    matchOnDescription: true,
+  });
+  if (picked === undefined) {
+    return;
+  }
+  const commandId = itemToCommand.get(picked);
+  if (commandId !== undefined) {
+    await vscode.commands.executeCommand(commandId);
+  }
+}
+
 async function runBatchResolution(
   args: unknown,
   side: ConflictResolutionSide,
@@ -941,6 +991,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   let locatedClearedNotified = false;
   let previousSnapshot = store.getSnapshot();
   let activeScenario: MergeScenario = { kind: "none", inProgress: false };
+  vscode.commands.registerCommand("conflictResolver.quickPick", () => runConflictCommandPalette(store, undoStore, activeScenario));
   const startDecoration = vscode.window.createTextEditorDecorationType({
     isWholeLine: true,
     overviewRulerColor: new vscode.ThemeColor("editorWarning.foreground"),

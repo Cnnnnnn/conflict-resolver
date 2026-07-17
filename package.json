@@ -84,6 +84,11 @@
         "title": "Conflict Resolver: Open Conflict Panel"
       },
       {
+        "command": "conflictResolver.quickPick",
+        "title": "Conflict Resolver: Quick Pick Command",
+        "icon": "$(list-filter)"
+      },
+      {
         "command": "conflictResolver.rescanCurrentFile",
         "title": "Conflict Resolver: Rescan Current File"
       },
