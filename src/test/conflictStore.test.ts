@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -135,8 +135,15 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
 
 class FakeGitRepositoryService {
   readonly findRepositoryRoot = vi.fn(async (uri: string) => {
+    // `URL#pathname` returns forward slashes on every platform (per the
+    // WHATWG URL spec). Normalise the native-separator repo roots so
+    // the prefix check works on Windows where `resolve("/repo")`
+    // yields `C:\repo`.
     const absolutePath = new URL(uri).pathname;
-    const matchingRoots = [...this.knownRepositoryRoots].filter(
+    const posixRoots = [...this.knownRepositoryRoots].map((root) =>
+      root.split(sep).join("/"),
+    );
+    const matchingRoots = posixRoots.filter(
       (repositoryRoot) =>
         absolutePath === repositoryRoot ||
         absolutePath.startsWith(`${repositoryRoot}/`),
@@ -146,7 +153,10 @@ class FakeGitRepositoryService {
     }
 
     matchingRoots.sort((left, right) => right.length - left.length);
-    return matchingRoots[0];
+    // Return the longest match in native form (the production code
+    // normalises with `resolve` and POSIX-joins the segments itself).
+    const matchedIndex = posixRoots.indexOf(matchingRoots[0]);
+    return [...this.knownRepositoryRoots][matchedIndex];
   });
 
   readonly listUnmergedFiles = vi.fn(async (repositoryRoot: string) => {
