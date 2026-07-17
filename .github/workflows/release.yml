@@ -19,6 +19,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Use public npm registry
+        shell: bash
         run: |
           rm -f package-lock.json
           npm install --no-audit --registry=https://registry.npmjs.org/

@@ -28,6 +28,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
+        shell: bash
         # Drop package-lock.json: every `resolved` URL points at the
         # author's internal Nexus, which the runner cannot reach.
         # `npm install` regenerates a fresh lockfile against
@@ -37,6 +38,7 @@ jobs:
           rm -f package-lock.json
           npm install --no-audit --registry=https://registry.npmjs.org/
       - name: Check (tsc + vitest)
+        shell: bash
         run: npm run check
 
   package:
@@ -54,10 +56,12 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
+        shell: bash
         run: |
           rm -f package-lock.json
           npm install --no-audit --registry=https://registry.npmjs.org/
       - name: Build VSIX
+        shell: bash
         run: npx @vscode/vsce package --no-dependencies
       - name: Upload VSIX (pull request)
         if: github.event_name == 'pull_request'
