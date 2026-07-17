@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getStatusBarState } from "../statusBar";
+import {
+  ConflictStatusBar,
+  getStatusBarState,
+  type StatusBarItemAdapter,
+} from "../statusBar";
 import type { ConflictSnapshot } from "../types";
 
 const snapshot = (files: ConflictSnapshot["files"]): ConflictSnapshot => ({
@@ -75,5 +79,122 @@ describe("getStatusBarState", () => {
       kind: "git-only",
       text: "$(history) Git 未解决，位置未知",
     });
+  });
+});
+
+describe("ConflictStatusBar label command", () => {
+  type AdapterItem = StatusBarItemAdapter & { text: string; command: string | undefined; tooltip: string | undefined; visible: boolean };
+
+  function makeItem(): AdapterItem {
+    let item: AdapterItem;
+    return item = {
+      text: "",
+      command: undefined,
+      tooltip: undefined,
+      visible: false,
+      show() {
+        this.visible = true;
+      },
+      hide() {
+        this.visible = false;
+      },
+      dispose() {
+        item.visible = false;
+      },
+    };
+  }
+
+  function makeAdapter() {
+    const items: AdapterItem[] = [];
+    return {
+      items,
+      createStatusBarItem(): AdapterItem {
+        const item = makeItem();
+        items.push(item);
+        return item;
+      },
+    };
+  }
+
+  function makeStore(getSnapshotValue: ConflictSnapshot) {
+    return {
+      getSnapshot: () => getSnapshotValue,
+      onDidChange: (listener: (snapshot: ConflictSnapshot) => void) => {
+        listener(getSnapshotValue);
+        return { dispose: () => undefined };
+      },
+    };
+  }
+
+  function makeActiveFile(uri?: string) {
+    return {
+      getActiveUri: () => uri,
+      getActiveLine: () => 1,
+      onDidChangeActiveUri: () => ({ dispose: () => undefined }),
+    };
+  }
+
+  const conflictFile = {
+    uri: "file:///repo/a.ts",
+    repositoryRoot: "/repo",
+    relativePath: "a.ts",
+    gitUnmerged: true,
+    locatedConflicts: [
+      { id: "a", startLine: 1, separatorLine: 2, endLine: 3, oursRange: { startLine: 2, endLine: 2 }, theirsRange: { startLine: 3, endLine: 3 } },
+    ],
+  };
+  const gitOnlyFile = { ...conflictFile, locatedConflicts: [] };
+
+  it("uses the default resolver to attach a command to the label", () => {
+    const adapter = makeAdapter();
+    const bar = new ConflictStatusBar({
+      statusBar: adapter,
+      store: makeStore(snapshot([conflictFile])),
+      activeFile: makeActiveFile(conflictFile.uri),
+    });
+    const label = adapter.items[1]!;
+    expect(label.command).toBe("conflictResolver.nextConflict");
+    bar.dispose();
+  });
+
+  it("opens panel for located conflicts when viewing an unrelated file", () => {
+    const adapter = makeAdapter();
+    const bar = new ConflictStatusBar({
+      statusBar: adapter,
+      store: makeStore(snapshot([conflictFile])),
+      activeFile: makeActiveFile("file:///repo/other.ts"),
+    });
+    expect(adapter.items[1]!.command).toBe("conflictResolver.openPanel");
+    bar.dispose();
+  });
+
+  it("uses rescanCurrentFile for git-only labels", () => {
+    const adapter = makeAdapter();
+    const bar = new ConflictStatusBar({
+      statusBar: adapter,
+      store: makeStore(snapshot([gitOnlyFile])),
+      activeFile: makeActiveFile(gitOnlyFile.uri),
+    });
+    const label = adapter.items[1]!;
+    expect(label.command).toBe("conflictResolver.rescanCurrentFile");
+    bar.dispose();
+  });
+
+  it("refreshCommand re-evaluates the resolver", () => {
+    const adapter = makeAdapter();
+    const stageAll = "conflictResolver.stageAllResolved";
+    const continueScenario = "conflictResolver.continueScenario";
+    let pick: string | undefined = stageAll;
+    const bar = new ConflictStatusBar({
+      statusBar: adapter,
+      store: makeStore(snapshot([conflictFile])),
+      activeFile: makeActiveFile(),
+      resolveCommand: () => pick,
+    });
+    expect(adapter.items[1]!.command).toBe(stageAll);
+    pick = continueScenario;
+    bar.refreshCommand();
+    expect(adapter.items[1]!.command).toBe(continueScenario);
+    bar.dispose();
   });
 });

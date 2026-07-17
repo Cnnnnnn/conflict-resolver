@@ -53,10 +53,28 @@ export type StatusBarState =
       icon?: string;
     };
 
+export type StatusBarCommandContext = {
+  state: StatusBarState;
+  snapshot: ConflictSnapshot;
+  activeUri: string | undefined;
+  activeLine: number | undefined;
+};
+
+export type StatusBarCommandResolver = (
+  context: StatusBarCommandContext,
+) => string | undefined;
+
 export type ConflictStatusBarOptions = {
   activeFile: ActiveFileSource;
   statusBar: StatusBarAdapter;
   store: StatusBarStore;
+  /**
+   * Optional resolver that picks the VS Code command to attach to the
+   * status bar label. Returning undefined leaves the label non-clickable.
+   * The default resolver advances to the next conflict for located states
+   * and triggers no command for git-only states.
+   */
+  resolveCommand?: StatusBarCommandResolver;
 };
 
 const GIT_ONLY_TEXT = "Git 未解决，位置未知";
@@ -169,6 +187,7 @@ export class ConflictStatusBar {
     this.nextItem.text = "$(chevron-right)";
     this.nextItem.command = NEXT_CONFLICT_COMMAND;
     this.nextItem.tooltip = "下一个冲突";
+    this.labelItem.tooltip = "点击查看或跳转";
     this.activeUri = options.activeFile.getActiveUri();
     this.activeLine = options.activeFile.getActiveLine();
     this.subscriptions = [
@@ -190,6 +209,15 @@ export class ConflictStatusBar {
       return;
     }
     this.scenarioIcon = icon;
+    this.render(this.options.store.getSnapshot());
+  }
+
+  /**
+   * Re-evaluates the label's command. Call this when external state
+   * (e.g. user setting `conflictResolver.silentScenarioContinue`)
+   * changes which command should be attached to the status bar.
+   */
+  refreshCommand(): void {
     this.render(this.options.store.getSnapshot());
   }
 
@@ -234,6 +262,44 @@ export class ConflictStatusBar {
 
     this.labelItem.text = state.text;
     this.labelItem.tooltip = state.tooltip;
+    this.labelItem.command = this.resolveLabelCommand(state, snapshot);
     this.labelItem.show();
   }
+
+  private resolveLabelCommand(state: StatusBarState, snapshot: ConflictSnapshot): string | undefined {
+    if (this.options.resolveCommand === undefined) {
+      return defaultStatusBarCommandResolver({
+        state,
+        snapshot,
+        activeUri: this.activeUri,
+        activeLine: this.activeLine,
+      });
+    }
+    return this.options.resolveCommand({
+      state,
+      snapshot,
+      activeUri: this.activeUri,
+      activeLine: this.activeLine,
+    });
+  }
+}
+
+function defaultStatusBarCommandResolver({
+  state,
+  activeUri,
+  activeLine,
+}: StatusBarCommandContext): string | undefined {
+  if (state.kind === "located") {
+    if (state.activeFileConflictCount > 0) {
+      return NEXT_CONFLICT_COMMAND;
+    }
+    if (activeUri !== undefined && state.uri === activeUri) {
+      return "conflictResolver.firstConflictInActiveFile";
+    }
+    return "conflictResolver.openPanel";
+  }
+  if (state.kind === "git-only" && activeUri !== undefined) {
+    return "conflictResolver.rescanCurrentFile";
+  }
+  return undefined;
 }

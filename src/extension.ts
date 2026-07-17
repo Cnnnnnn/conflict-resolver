@@ -65,8 +65,8 @@ import {
   runScenarioContinue,
   type MergeScenario,
 } from "./mergeScenario";
-import type { ConflictBlock } from "./types";
-import { ConflictStatusBar } from "./statusBar";
+import type { ConflictBlock, ConflictSnapshot } from "./types";
+import { ConflictStatusBar, type StatusBarState } from "./statusBar";
 
 const GIT_STATE_WATCH_PATTERNS = [
   "**/.git/MERGE_HEAD",
@@ -85,6 +85,40 @@ const DOCUMENT_UI_REFRESH_DEBOUNCE_MS = 50;
 // Skip reading files larger than this from disk so a huge unmerged file cannot
 // block the UI thread; its git state is still reflected via the index.
 const MAX_DISK_READ_BYTES = 5 * 1024 * 1024;
+
+// Status bar label click target. Higher-priority states (scenario in progress,
+// markers cleared) win so a single click resolves the most relevant next step.
+function resolveStatusBarLabelCommand(
+  state: StatusBarState,
+  snapshot: ConflictSnapshot,
+  activeUri: string | undefined,
+  activeLine: number | undefined,
+  activeScenario: MergeScenario,
+): string | undefined {
+  const markersCleared =
+    snapshot.locatedCount === 0 &&
+    snapshot.files.some((file) => file.gitUnmerged);
+  if (markersCleared) {
+    return "conflictResolver.stageAllResolved";
+  }
+  if (activeScenario.inProgress && activeScenario.kind !== "none") {
+    return "conflictResolver.continueScenario";
+  }
+  if (state.kind === "git-only") {
+    return activeUri !== undefined ? "conflictResolver.rescanCurrentFile" : undefined;
+  }
+  if (state.kind === "located") {
+    if (state.activeFileConflictCount > 0) {
+      return "conflictResolver.nextConflict";
+    }
+    if (activeUri !== undefined && state.uri === activeUri) {
+      return "conflictResolver.firstConflictInActiveFile";
+    }
+    return "conflictResolver.openPanel";
+  }
+  void activeLine;
+  return undefined;
+}
 
 // Built-in `merge-conflict.accept.*` commands are provided by VS Code's built-in
 // Merge Conflict support. When they are unavailable (e.g. disabled, or a Cursor
@@ -971,6 +1005,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       getActiveLine: () => vscode.window.activeTextEditor?.selection.active.line,
       onDidChangeActiveUri: (listener) => vscode.window.onDidChangeActiveTextEditor((editor) => listener(editor?.document.uri.toString())),
     },
+    resolveCommand: ({ state, snapshot, activeUri, activeLine }) =>
+      resolveStatusBarLabelCommand(state, snapshot, activeUri, activeLine, activeScenario),
   });
 
   const conflictUndoWorkspace: ConflictUndoWorkspace = {
@@ -1012,6 +1048,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       "conflictResolver.markersCleared",
       markersCleared,
     );
+    statusBar.refreshCommand();
   };
 
   const handleSnapshotTransition = (snapshot: ReturnType<typeof store.getSnapshot>): void => {
