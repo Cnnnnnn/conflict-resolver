@@ -43,12 +43,14 @@ export type StatusBarState =
       activeFileConflictCount: number;
       totalLocatedConflictCount: number;
       uri: string;
+      icon?: string;
     }
   | {
       kind: "git-only";
-      text: "Git 未解决，位置未知";
+      text: string;
       tooltip: string;
       uri: string;
+      icon?: string;
     };
 
 export type ConflictStatusBarOptions = {
@@ -73,6 +75,7 @@ function buildLocatedStatusBarState(
   snapshot: ConflictSnapshot,
   activeUri: string | undefined,
   activeLine: number | undefined,
+  icon: string | undefined,
 ): StatusBarState {
   const progressLabel = formatMergeProgressLabel(getMergeProgress(snapshot));
   const order = buildWorkspaceConflictOrder(snapshot);
@@ -86,12 +89,13 @@ function buildLocatedStatusBarState(
     activeUri === undefined || activeLine === undefined
       ? -1
       : findWorkspaceConflictIndexAtOrBefore(order, activeUri, activeLine);
-  const text =
+  const baseText =
     currentIndex >= 0
       ? `冲突 ${currentIndex + 1}/${order.length} · ${fileCount} 文件`
       : activeFile !== undefined && activeFile.locatedConflicts.length > 0
         ? `冲突 · ${activeFile.locatedConflicts.length} 处`
         : `共 ${snapshot.locatedCount} 处冲突 · ${fileCount} 文件`;
+  const text = icon === undefined ? baseText : `${icon} ${baseText}`;
   const tooltipPath = activeFile?.relativePath ?? progressLabel;
 
   return {
@@ -101,6 +105,7 @@ function buildLocatedStatusBarState(
     activeFileConflictCount: activeFile?.locatedConflicts.length ?? 0,
     totalLocatedConflictCount: snapshot.locatedCount,
     uri: activeFile?.uri ?? order[0]?.uri ?? activeUri ?? "",
+    icon,
   };
 }
 
@@ -108,9 +113,10 @@ export function getStatusBarState(
   snapshot: ConflictSnapshot,
   activeUri: string | undefined,
   activeLine: number | undefined,
+  icon?: string,
 ): StatusBarState | undefined {
   if (snapshot.locatedCount > 0) {
-    return buildLocatedStatusBarState(snapshot, activeUri, activeLine);
+    return buildLocatedStatusBarState(snapshot, activeUri, activeLine, icon);
   }
 
   if (activeUri === undefined) {
@@ -129,11 +135,14 @@ export function getStatusBarState(
   const progressLabel = formatMergeProgressLabel(getMergeProgress(snapshot));
 
   if (activeFile.gitUnmerged) {
+    const text: string =
+      icon === undefined ? GIT_ONLY_TEXT : `${icon} ${GIT_ONLY_TEXT}`;
     return {
       kind: "git-only",
-      text: GIT_ONLY_TEXT,
+      text,
       tooltip: `${progressLabel}\n${activeFile.relativePath}`,
       uri: activeFile.uri,
+      icon,
     };
   }
 
@@ -147,6 +156,7 @@ export class ConflictStatusBar {
   private readonly subscriptions: StatusBarDisposable[];
   private activeUri: string | undefined;
   private activeLine: number | undefined;
+  private scenarioIcon: string | undefined;
 
   constructor(private readonly options: ConflictStatusBarOptions) {
     // VS Code left-aligned status bar: a larger priority places the item further left.
@@ -163,16 +173,24 @@ export class ConflictStatusBar {
     this.activeLine = options.activeFile.getActiveLine();
     this.subscriptions = [
       options.store.onDidChange((snapshot) => {
-        this.render(snapshot, this.activeUri, this.activeLine);
+        this.render(snapshot);
       }),
       options.activeFile.onDidChangeActiveUri((uri) => {
         this.activeUri = uri;
         this.activeLine = options.activeFile.getActiveLine();
-        this.render(this.options.store.getSnapshot(), uri, this.activeLine);
+        this.render(this.options.store.getSnapshot());
       }),
     ];
 
-    this.render(options.store.getSnapshot(), this.activeUri, this.activeLine);
+    this.render(options.store.getSnapshot());
+  }
+
+  setScenarioIcon(icon: string | undefined): void {
+    if (this.scenarioIcon === icon) {
+      return;
+    }
+    this.scenarioIcon = icon;
+    this.render(this.options.store.getSnapshot());
   }
 
   dispose(): void {
@@ -185,12 +203,13 @@ export class ConflictStatusBar {
     this.nextItem.dispose();
   }
 
-  private render(
-    snapshot: ConflictSnapshot,
-    activeUri: string | undefined,
-    activeLine: number | undefined,
-  ): void {
-    const state = getStatusBarState(snapshot, activeUri, activeLine);
+  private render(snapshot: ConflictSnapshot): void {
+    const state = getStatusBarState(
+      snapshot,
+      this.activeUri,
+      this.activeLine,
+      this.scenarioIcon,
+    );
     const showNavigation = shouldShowConflictNavigation(snapshot);
 
     if (!showNavigation && state === undefined) {

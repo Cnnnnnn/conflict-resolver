@@ -14,11 +14,11 @@ describe("createConflictUndoStore", () => {
   it("starts empty", () => {
     const store = createConflictUndoStore();
     expect(store.size()).toBe(0);
-    expect(store.take()).toEqual([]);
+    expect(store.take()).toBeUndefined();
     expect(store.describe()).toBeUndefined();
   });
 
-  it("records entries and pops the most recent on take", () => {
+  it("records entries and pops the most recent batch on take", () => {
     const store = createConflictUndoStore();
     store.record([makeEntry("a", "first")]);
     store.record([makeEntry("b", "second")]);
@@ -27,17 +27,42 @@ describe("createConflictUndoStore", () => {
     expect(store.describe()).toBe("撤销：b");
 
     const taken = store.take();
-    expect(taken).toHaveLength(1);
-    expect(taken[0]?.label).toBe("b");
+    expect(taken?.entries).toHaveLength(1);
+    expect(taken?.entries[0]?.label).toBe("b");
     expect(store.size()).toBe(1);
   });
 
-  it("caps history depth", () => {
+  it("treats each record() call as one undoable batch", () => {
     const store = createConflictUndoStore();
-    for (let i = 0; i < 8; i += 1) {
+    store.record([
+      makeEntry("a", "1"),
+      makeEntry("a", "2"),
+      makeEntry("a", "3"),
+    ]);
+
+    const taken = store.take();
+    expect(taken?.entries).toHaveLength(3);
+    expect(taken?.label).toBe("a × 3");
+    expect(store.size()).toBe(0);
+  });
+
+  it("caps history depth at 20", () => {
+    const store = createConflictUndoStore();
+    for (let i = 0; i < 25; i += 1) {
       store.record([makeEntry(String(i), String(i))]);
     }
-    expect(store.size()).toBeLessThanOrEqual(5);
+    expect(store.size()).toBeLessThanOrEqual(20);
+  });
+
+  it("caps entries per batch at 200", () => {
+    const store = createConflictUndoStore();
+    const many = Array.from({ length: 500 }, (_, i) =>
+      makeEntry(`f${i}`, String(i)),
+    );
+    store.record(many);
+
+    const taken = store.take();
+    expect(taken?.entries).toHaveLength(200);
   });
 });
 

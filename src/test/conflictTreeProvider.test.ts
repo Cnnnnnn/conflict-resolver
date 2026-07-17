@@ -219,9 +219,11 @@ describe("ConflictTreeProvider", () => {
     provider.setWorkState({ hadLocatedConflicts: true, hadUnmergedFiles: true });
 
     const rootItems = await provider.getChildren();
-    expect(rootItems[0].label).toBe("✓ 冲突标记已处理 · 剩余 1 个文件待 git add");
+    expect(rootItems[0].label).toBe(
+      "✓ 冲突标记已处理 · 剩余 1 个文件待 git add（命令面板: Conflict Resolver: Stage All Resolved）",
+    );
     expect(provider.getCompletionMessage()).toBe(
-      "✓ 冲突标记已处理 · 剩余 1 个文件待 git add",
+      "✓ 冲突标记已处理 · 剩余 1 个文件待 git add（命令面板: Conflict Resolver: Stage All Resolved）",
     );
 
     const activeStore = new FakeConflictStore(

@@ -69,7 +69,7 @@ describe("conflictCompletion", () => {
 
     expect(getCompletionKind(cleared, state)).toBe("markers-cleared");
     expect(formatCompletionLabel("markers-cleared", cleared)).toBe(
-      "✓ 冲突标记已处理 · 剩余 1 个文件待 git add",
+      "✓ 冲突标记已处理 · 剩余 1 个文件待 git add（命令面板: Conflict Resolver: Stage All Resolved）",
     );
   });
 

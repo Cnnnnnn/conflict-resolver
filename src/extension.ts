@@ -59,6 +59,7 @@ import {
 import { formatMergeProgressLabel, getMergeProgress } from "./mergeProgress";
 import {
   detectMergeScenario,
+  formatScenarioIcon,
   formatScenarioLabel,
   formatScenarioTitle,
   runScenarioContinue,
@@ -75,6 +76,11 @@ const GIT_STATE_WATCH_PATTERNS = [
 ] as const;
 
 const DOCUMENT_CHANGE_DEBOUNCE_MS = 16;
+// Coalesce UI refreshes triggered by onDidChangeTextDocument. The store keeps
+// its own snapshot fresh synchronously (applyOpenDocumentText), so delaying the
+// tree/status bar/SCM context paint to this cadence does not lose information
+// while preventing per-keystroke rendering churn on large files.
+const DOCUMENT_UI_REFRESH_DEBOUNCE_MS = 50;
 
 // Skip reading files larger than this from disk so a huge unmerged file cannot
 // block the UI thread; its git state is still reflected via the index.
@@ -528,17 +534,29 @@ async function runBatchResolution(
   const selection = tree.getSelection();
 
   let targets: { uri: string; conflictId: string }[] = [];
+  let fileScope: string | undefined;
 
   if (
     args !== undefined &&
     typeof args === "object" &&
     args !== null &&
-    "uri" in args &&
-    "conflictId" in args
+    "uri" in args
   ) {
-    const candidate = args as { uri: unknown; conflictId: unknown };
-    if (typeof candidate.uri === "string" && typeof candidate.conflictId === "string") {
-      targets = [{ uri: candidate.uri, conflictId: candidate.conflictId }];
+    const candidate = args as { uri: unknown; conflictId?: unknown };
+    if (typeof candidate.uri === "string") {
+      if (typeof candidate.conflictId === "string") {
+        targets = [{ uri: candidate.uri, conflictId: candidate.conflictId }];
+      } else {
+        fileScope = candidate.uri;
+      }
+    }
+  }
+
+  if (targets.length === 0 && fileScope !== undefined) {
+    targets = collectBatchTargets(snapshot, { kind: "file", fileUri: fileScope });
+    if (targets.length === 0) {
+      await vscode.window.showInformationMessage("该文件没有可处理的冲突");
+      return;
     }
   }
 
@@ -688,16 +706,16 @@ function registerConflictSubscriptions(
       },
     ),
     vscode.commands.registerCommand("conflictResolver.undoLastAccept", async () => {
-      const entries = undoStore.take();
+      const batch = undoStore.take();
       syncUndoContext();
-      if (entries.length === 0) {
+      if (batch === undefined || batch.entries.length === 0) {
         await vscode.window.showInformationMessage("没有可撤销的采纳操作");
         return;
       }
-      const result = await applyConflictUndo(entries, conflictUndoWorkspace);
+      const result = await applyConflictUndo(batch.entries, conflictUndoWorkspace);
       await store.waitForChange();
       if (result.failed === 0) {
-        await vscode.window.showInformationMessage(`已撤销：${entries[0]?.label ?? ""}`);
+        await vscode.window.showInformationMessage(`已撤销：${batch.label}`);
       } else {
         await vscode.window.showWarningMessage(
           `已撤销 ${result.restored} 个文件，${result.failed} 个失败`,
@@ -713,6 +731,12 @@ function registerConflictSubscriptions(
     vscode.commands.registerCommand("conflictResolver.previousConflict", () => navigation.previous()),
     vscode.commands.registerCommand("conflictResolver.nextConflictInFile", () => navigation.nextInFile()),
     vscode.commands.registerCommand("conflictResolver.previousConflictInFile", () => navigation.previousInFile()),
+    vscode.commands.registerCommand("conflictResolver.nextFile", () => navigation.nextFile()),
+    vscode.commands.registerCommand("conflictResolver.previousFile", () => navigation.previousFile()),
+    vscode.commands.registerCommand("conflictResolver.firstConflictInActiveFile", () => {
+      const uri = vscode.window.activeTextEditor?.document.uri.toString();
+      return uri === undefined ? undefined : navigation.jumpToFirstInFile(uri);
+    }),
     vscode.commands.registerCommand("conflictResolver.openPanel", () => vscode.commands.executeCommand("workbench.view.extension.conflictResolver")),
     vscode.commands.registerCommand("conflictResolver.rescanCurrentFile", () => store.refresh()),
     vscode.commands.registerCommand("conflictResolver.openMergeEditor", () => {
@@ -763,25 +787,41 @@ function registerConflictSubscriptions(
     }),
     vscode.workspace.onDidOpenTextDocument(() => store.scheduleRefresh("document-open")),
     vscode.workspace.onDidCloseTextDocument(() => store.scheduleRefresh("document-close")),
-    vscode.workspace.onDidChangeTextDocument((event) => {
-      const changed = store.applyOpenDocumentText(
-        event.document.uri.toString(),
-        event.document.getText(),
-      );
-      if (
-        changed ||
-        hasLocatedConflictMarkers(event.document.getText()) ||
-        isTrackedConflictDocument(event.document, store.getSnapshot())
-      ) {
-        void deps.refreshConflictUi(store.getSnapshot()).catch(logError);
-      }
+    // Coalesce per-keystroke UI refreshes. The store snapshot stays fresh
+    // synchronously (applyOpenDocumentText); only the tree / status bar / SCM
+    // context paint is debounced to avoid redrawing on every keystroke.
+    (() => {
+      let uiRefreshTimer: ReturnType<typeof setTimeout> | undefined;
+      const scheduleUiRefresh = (): void => {
+        if (uiRefreshTimer !== undefined) {
+          clearTimeout(uiRefreshTimer);
+        }
+        uiRefreshTimer = setTimeout(() => {
+          uiRefreshTimer = undefined;
+          void deps.refreshConflictUi(store.getSnapshot()).catch(logError);
+        }, DOCUMENT_UI_REFRESH_DEBOUNCE_MS);
+      };
+      return vscode.workspace.onDidChangeTextDocument((event) => {
+        const changed = store.applyOpenDocumentText(
+          event.document.uri.toString(),
+          event.document.getText(),
+        );
+        if (
+          changed ||
+          hasLocatedConflictMarkers(event.document.getText()) ||
+          isTrackedConflictDocument(event.document, store.getSnapshot())
+        ) {
+          scheduleUiRefresh();
+        }
 
-      if (isTrackedConflictDocument(event.document, store.getSnapshot())) {
-        store.scheduleRefresh("document-change", { debounceMs: DOCUMENT_CHANGE_DEBOUNCE_MS });
-      }
-    }),
+        if (isTrackedConflictDocument(event.document, store.getSnapshot())) {
+          store.scheduleRefresh("document-change", { debounceMs: DOCUMENT_CHANGE_DEBOUNCE_MS });
+        }
+      });
+    })(),
     vscode.workspace.onDidSaveTextDocument(() => store.scheduleImmediateRefresh("document-save")),
     vscode.window.onDidChangeActiveTextEditor((editor) => {
+      tree.setActiveFileUri(editor?.document.uri.toString());
       store.scheduleRefresh("active-editor");
       void updateScmMenuContext(
         store.getSnapshot(),
@@ -966,6 +1006,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       "conflictResolver.scenarioKind",
       activeScenario.kind,
     );
+    const markersCleared = snapshot.locatedCount === 0 && snapshot.files.some((file) => file.gitUnmerged);
+    void vscode.commands.executeCommand(
+      "setContext",
+      "conflictResolver.markersCleared",
+      markersCleared,
+    );
   };
 
   const handleSnapshotTransition = (snapshot: ReturnType<typeof store.getSnapshot>): void => {
@@ -1001,6 +1047,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   const ensureScenarioUpToDate = async (snapshot: ReturnType<typeof store.getSnapshot>): Promise<void> => {
     await refreshScenario();
+    statusBar.setScenarioIcon(formatScenarioIcon(activeScenario));
     if (
       activeScenario.inProgress &&
       formatScenarioLabel(activeScenario) !== undefined
@@ -1027,6 +1074,33 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return;
       }
       store.scheduleImmediateRefresh("scenario-continue");
+    }),
+    vscode.commands.registerCommand("conflictResolver.stageAllResolved", async () => {
+      const snapshot = store.getSnapshot();
+      const targets = snapshot.files.filter((file) => file.gitUnmerged);
+      if (targets.length === 0) {
+        await vscode.window.showInformationMessage("没有可暂存的已解决冲突文件");
+        return;
+      }
+      let staged = 0;
+      let failed = 0;
+      for (const file of targets) {
+        try {
+          await vscode.commands.executeCommand("git.add", vscode.Uri.parse(file.uri));
+          staged += 1;
+        } catch (error) {
+          logError(error);
+          failed += 1;
+        }
+      }
+      store.scheduleImmediateRefresh("stage-all-resolved");
+      if (failed === 0) {
+        await vscode.window.showInformationMessage(`已暂存 ${staged} 个已解决冲突文件`);
+      } else {
+        await vscode.window.showWarningMessage(
+          `已暂存 ${staged} 个文件，${failed} 个失败`,
+        );
+      }
     }),
   );
 
@@ -1072,6 +1146,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   activeStore = store;
 
   void store.refresh().then((snapshot) => refreshConflictUi(snapshot)).catch(logError);
+
+  tree.setActiveFileUri(vscode.window.activeTextEditor?.document.uri.toString());
 }
 
 export function deactivate(): void {

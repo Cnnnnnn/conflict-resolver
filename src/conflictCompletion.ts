@@ -52,7 +52,7 @@ export function formatCompletionLabel(
   switch (kind) {
     case "markers-cleared": {
       const unmergedCount = snapshot.files.filter((file) => file.gitUnmerged).length;
-      return `✓ 冲突标记已处理 · 剩余 ${unmergedCount} 个文件待 git add`;
+      return `✓ 冲突标记已处理 · 剩余 ${unmergedCount} 个文件待 git add（命令面板: Conflict Resolver: Stage All Resolved）`;
     }
     case "all-resolved":
       return "✓ 合并冲突已全部处理完毕";

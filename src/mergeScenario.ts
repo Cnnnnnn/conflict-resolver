@@ -23,6 +23,15 @@ const SCENARIO_VERB: Record<Exclude<MergeScenarioKind, "none">, string> = {
   "cherry-pick": "cherry-pick 中",
 };
 
+// VS Code ThemeIcon ids used to distinguish scenarios in the status bar and
+// the conflict panel header. Falls back to a generic icon for unsupported
+// kinds so the visual cue never disappears entirely.
+const SCENARIO_ICON: Record<Exclude<MergeScenarioKind, "none">, string> = {
+  merge: "$(git-merge)",
+  rebase: "$(history)",
+  "cherry-pick": "$(git-cherry-pick)",
+};
+
 export async function detectMergeScenario(
   repositoryRoot: string,
   fsAdapter: Pick<typeof fs, "stat"> = fs,
@@ -81,6 +90,13 @@ export function formatScenarioTitle(scenario: MergeScenario): string | undefined
     return undefined;
   }
   return SCENARIO_LABEL[scenario.kind];
+}
+
+export function formatScenarioIcon(scenario: MergeScenario): string | undefined {
+  if (!scenario.inProgress || scenario.kind === "none") {
+    return undefined;
+  }
+  return SCENARIO_ICON[scenario.kind];
 }
 
 export async function runScenarioContinue(

@@ -46,6 +46,29 @@ export class ConflictNavigation {
     return this.navigateWorkspace(-1);
   }
 
+  async nextFile(): Promise<boolean> {
+    return this.navigateFile(1);
+  }
+
+  async previousFile(): Promise<boolean> {
+    return this.navigateFile(-1);
+  }
+
+  async jumpToFirstInFile(uri: string): Promise<boolean> {
+    const file = this.findFile(uri);
+    if (file === undefined || file.locatedConflicts.length === 0) {
+      return false;
+    }
+    const sorted = [...file.locatedConflicts].sort(
+      (left, right) => left.startLine - right.startLine,
+    );
+    const first = sorted[0];
+    if (first === undefined) {
+      return false;
+    }
+    return this.goTo(file.uri, first.id);
+  }
+
   async nextInFile(): Promise<boolean> {
     return this.navigateInFile(1);
   }
@@ -200,6 +223,47 @@ export class ConflictNavigation {
     }
     if (conflicts.length === 0 && file.gitUnmerged) return this.openMergeEditor(file.uri);
     return false;
+  }
+
+  private async navigateFile(direction: 1 | -1): Promise<boolean> {
+    const orderedFiles = [...this.snapshot.files]
+      .filter((file) => file.locatedConflicts.length > 0)
+      .sort((left, right) =>
+        canonicalizeConflictUri(left.uri).localeCompare(canonicalizeConflictUri(right.uri)),
+      );
+
+    if (orderedFiles.length === 0) {
+      return false;
+    }
+
+    const active = this.callbacks.getActiveLocation();
+    if (active === undefined) {
+      const first = direction === 1 ? orderedFiles[0] : orderedFiles[orderedFiles.length - 1];
+      return first === undefined ? false : this.jumpToFirstInFile(first.uri);
+    }
+
+    const activeKey = canonicalizeConflictUri(active.uri);
+    const currentIndex = orderedFiles.findIndex(
+      (file) => canonicalizeConflictUri(file.uri) === activeKey,
+    );
+
+    let targetIndex: number;
+    if (currentIndex < 0) {
+      // Active editor is outside any conflict file; jump to nearest file by
+      // document order so the user lands on the closest file rather than the
+      // start of the list.
+      targetIndex = direction === 1 ? 0 : orderedFiles.length - 1;
+    } else {
+      targetIndex = currentIndex + direction;
+      if (targetIndex < 0) {
+        targetIndex = orderedFiles.length - 1;
+      } else if (targetIndex >= orderedFiles.length) {
+        targetIndex = 0;
+      }
+    }
+
+    const target = orderedFiles[targetIndex];
+    return target === undefined ? false : this.jumpToFirstInFile(target.uri);
   }
 
   private async openMergeEditor(uri: string): Promise<boolean> {

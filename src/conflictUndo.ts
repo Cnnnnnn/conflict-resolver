@@ -15,44 +15,68 @@ export type ConflictUndoWorkspace = {
   createRange(start: vscode.Position, end: vscode.Position): vscode.Range;
 };
 
+export type ConflictUndoBatch = {
+  label: string;
+  entries: readonly ConflictUndoEntry[];
+};
+
 export type ConflictUndoStore = {
   record(entries: readonly ConflictUndoEntry[]): void;
-  take(): ConflictUndoEntry[];
+  take(): ConflictUndoBatch | undefined;
   size(): number;
   describe(): string | undefined;
 };
 
-const MAX_UNDO_STACK = 5;
+const MAX_UNDO_STACK = 20;
+const MAX_ENTRIES_PER_BATCH = 200;
 
 export function createConflictUndoStore(): ConflictUndoStore {
-  let stack: ConflictUndoEntry[] = [];
+  let stack: ConflictUndoBatch[] = [];
 
   return {
     record(entries) {
       if (entries.length === 0) {
         return;
       }
-      stack = [...entries, ...stack].slice(0, MAX_UNDO_STACK);
+      // One undo batch corresponds to one record() call so batch accepts are
+      // undone atomically. Cap the entries per batch so a multi-thousand
+      // file operation does not blow memory.
+      const limited = entries.slice(0, MAX_ENTRIES_PER_BATCH);
+      const label = deriveBatchLabel(limited);
+      const batch: ConflictUndoBatch = { label, entries: limited };
+      stack = [batch, ...stack].slice(0, MAX_UNDO_STACK);
     },
     take() {
-      const entry = stack[0];
-      if (entry === undefined) {
-        return [];
+      const batch = stack[0];
+      if (batch === undefined) {
+        return undefined;
       }
       stack = stack.slice(1);
-      return [entry];
+      return batch;
     },
     size() {
       return stack.length;
     },
     describe() {
-      const entry = stack[0];
-      if (entry === undefined) {
+      const batch = stack[0];
+      if (batch === undefined) {
         return undefined;
       }
-      return `撤销：${entry.label}`;
+      return `撤销：${batch.label}`;
     },
   };
+}
+
+function deriveBatchLabel(entries: readonly ConflictUndoEntry[]): string {
+  if (entries.length === 1) {
+    return entries[0]?.label ?? "";
+  }
+  const uniqueLabels = new Set(entries.map((entry) => entry.label));
+  if (uniqueLabels.size === 1) {
+    const only = entries[0]?.label ?? "";
+    return `${only} × ${entries.length}`;
+  }
+  return `${entries.length} 个文件`;
 }
 
 export async function applyConflictUndo(

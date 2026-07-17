@@ -274,14 +274,17 @@ function createFileItem(
   file: ConflictFile,
   groupKey: "located" | "gitOnly",
   createThemeIcon?: ThemeIconFactory,
+  isActive = false,
 ): ConflictTreeFileItem {
   const conflictCount = file.locatedConflicts.length;
+  const baseLabel = file.relativePath;
+  const label = isActive ? `$(eye) ${baseLabel}` : baseLabel;
   const item: ConflictTreeFileItem = {
     id: `file:${groupKey}:${file.uri}`,
     kind: "file",
     groupKey,
     contextValue: `conflictTreeFile:${groupKey}`,
-    label: file.relativePath,
+    label,
     uri: file.uri,
     relativePath: file.relativePath,
     conflictCount,
@@ -293,9 +296,9 @@ function createFileItem(
     tooltip:
       groupKey === "located"
         ? file.gitUnmerged
-          ? `${file.relativePath}\n${formatLocatedConflictLabel(conflictCount)}\nGit 状态未解决`
-          : `${file.relativePath}\n${formatLocatedConflictLabel(conflictCount)}`
-        : `${file.relativePath}\n${formatGitOnlyConflictLabel()}`,
+          ? `${file.relativePath}\n${formatLocatedConflictLabel(conflictCount)}\nGit 状态未解决${isActive ? "\n当前打开的文件" : ""}`
+          : `${file.relativePath}\n${formatLocatedConflictLabel(conflictCount)}${isActive ? "\n当前打开的文件" : ""}`
+        : `${file.relativePath}\n${formatGitOnlyConflictLabel()}${isActive ? "\n当前打开的文件" : ""}`,
     collapsibleState:
       groupKey === "located" ? vscode.TreeItemCollapsibleState.Collapsed : vscode.TreeItemCollapsibleState.None,
   };
@@ -406,6 +409,7 @@ export class ConflictTreeProvider
   private snapshot: ConflictSnapshot;
   private workState: ConflictWorkState = EMPTY_CONFLICT_WORK_STATE;
   private filterMode: ConflictTreeFilterMode = "all";
+  private activeFileUri: string | undefined;
   private readonly selection = new Set<string>();
   private readonly changeEmitter = new SimpleEmitter<
     ConflictTreeItem | undefined
@@ -448,6 +452,22 @@ export class ConflictTreeProvider
 
   getFilterMode(): ConflictTreeFilterMode {
     return this.filterMode;
+  }
+
+  setActiveFileUri(uri: string | undefined): void {
+    if (this.activeFileUri === uri) {
+      return;
+    }
+    this.activeFileUri = uri;
+    this.changeEmitter.fire(undefined);
+  }
+
+  getActiveFileUri(): string | undefined {
+    return this.activeFileUri;
+  }
+
+  private isActiveFile(uri: string): boolean {
+    return this.activeFileUri !== undefined && this.activeFileUri === uri;
   }
 
   getSelection(): ConflictTreeSelection {
@@ -572,7 +592,12 @@ export class ConflictTreeProvider
             );
 
       return files.map((file) =>
-        createFileItem(file, element.groupKey, this.createThemeIcon),
+        createFileItem(
+          file,
+          element.groupKey,
+          this.createThemeIcon,
+          this.isActiveFile(file.uri),
+        ),
       );
     }
 
