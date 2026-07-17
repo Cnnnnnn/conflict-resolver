@@ -27,13 +27,12 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - name: Use public npm registry
-        # Project-level .npmrc outranks the author's user-level ~/.npmrc,
-        # which points at an internal Nexus the runner cannot reach. The
-        # file is created per-job and never committed.
-        run: echo "registry=https://registry.npmjs.org/" > .npmrc
       - name: Install dependencies
-        run: npm ci
+        # --registry is the highest-priority npm config source (beats
+        # project .npmrc, user ~/.npmrc, and lockfile `resolved` URLs).
+        # Needed because package-lock.json was generated against the
+        # author's internal Nexus, which the runner cannot reach.
+        run: npm ci --registry=https://registry.npmjs.org/
       - name: Check (tsc + vitest)
         run: npm run check
 
@@ -51,10 +50,8 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - name: Use public npm registry
-        run: echo "registry=https://registry.npmjs.org/" > .npmrc
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --registry=https://registry.npmjs.org/
       - name: Build VSIX
         run: npx @vscode/vsce package --no-dependencies
       - name: Upload VSIX (pull request)

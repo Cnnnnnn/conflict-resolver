@@ -19,9 +19,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Use public npm registry
-        run: echo "registry=https://registry.npmjs.org/" > .npmrc
-      - name: Install dependencies
-        run: npm ci
+        run: npm ci --registry=https://registry.npmjs.org/
       - name: Check
         run: npm run check
       - name: Package VSIX
