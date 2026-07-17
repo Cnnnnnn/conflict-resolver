@@ -8,6 +8,7 @@ import {
   getConflictBadgeCount,
 } from "../conflictFileDecorations";
 import { toConflictFileKey } from "../conflictScmMenu";
+import { countGitOnlyFiles, countLocatedConflicts } from "../conflictPredicates";
 import type { ConflictSnapshot } from "../types";
 
 function toUri(filePath: string): string {
@@ -17,13 +18,8 @@ function toUri(filePath: string): string {
 function createSnapshot(files: ConflictSnapshot["files"]): ConflictSnapshot {
   return {
     files,
-    locatedCount: files.reduce(
-      (count, file) => count + file.locatedConflicts.length,
-      0,
-    ),
-    gitOnlyCount: files.filter(
-      (file) => file.gitUnmerged && file.locatedConflicts.length === 0,
-    ).length,
+    locatedCount: countLocatedConflicts(files),
+    gitOnlyCount: countGitOnlyFiles(files),
     generatedAt: 1,
   };
 }

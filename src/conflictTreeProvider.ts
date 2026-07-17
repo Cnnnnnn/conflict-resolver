@@ -18,7 +18,7 @@ import {
   formatConflictPreviewTooltip,
 } from "./conflictPreview";
 import { isLockFilePath } from "./conflictFilter";
-import { isGitOnlyUnresolved } from "./conflictPredicates";
+import { hasLocatedConflicts, isGitOnlyUnresolved } from "./conflictPredicates";
 import {
   formatGitOnlyConflictLabel,
   formatLocatedConflictLabel,
@@ -247,7 +247,7 @@ class SimpleEmitter<T> implements vscode.Disposable {
 
 function getLocatedFiles(snapshot: ConflictSnapshot): ConflictFile[] {
   return [...snapshot.files]
-    .filter((file) => file.locatedConflicts.length > 0)
+    .filter((file) => hasLocatedConflicts(file))
     .sort(compareFiles);
 }
 

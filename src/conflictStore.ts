@@ -6,7 +6,6 @@ import { parseConflictMarkers } from "./conflictParser";
 import { compareFiles } from "./conflictCompare";
 import type { ConflictFilter } from "./conflictFilter";
 import { createConflictFilter } from "./conflictFilter";
-import { isResolvedGitFile } from "./conflictPredicates";
 import { hasLocatedConflictMarkers, toConflictFileKey } from "./conflictScmMenu";
 import { GitRepositoryService } from "./gitRepositoryService";
 import type { ConflictBlock, ConflictFile, ConflictSnapshot, GitUnmergedFile } from "./types";
@@ -142,11 +141,11 @@ function shouldOmitResolvedGitFile(
   locatedConflicts: readonly ConflictBlock[],
   parseError: string | undefined,
 ): boolean {
-  return isResolvedGitFile({
-    gitUnmerged,
-    locatedConflicts,
-    parseError,
-  } as unknown as ConflictFile);
+  // Git reported the path as unmerged but the file is "effectively
+  // resolved" at the text level: zero markers AND no parse error.
+  // Such entries appear when git lags behind a manual edit; drop them
+  // so the snapshot doesn't carry ghosts.
+  return gitUnmerged && locatedConflicts.length === 0 && parseError === undefined;
 }
 
 function toFileSystemPath(uri: string): string | undefined {
@@ -596,7 +595,11 @@ export class ConflictStore {
       .filter((file) => this.filter.isIncluded(file.relativePath) && this.filter.matchesMode(file.relativePath))
       .filter(
         (file) =>
-          !isResolvedGitFile(file),
+          // Drop "false positive" unmerged entries: git listed the path
+          // as unmerged, but we parsed zero markers AND the parser
+          // didn't flag an error — the file is effectively resolved at
+          // the text level even if git hasn't caught up yet.
+          file.locatedConflicts.length > 0 || file.parseError !== undefined,
       );
 
     return finalizeSnapshot(snapshotFiles, this.now);

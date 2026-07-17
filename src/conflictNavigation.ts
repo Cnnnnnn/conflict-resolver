@@ -1,4 +1,5 @@
 import type { ConflictBlock, ConflictSnapshot } from "./types";
+import { isGitOnlyUnresolved } from "./conflictPredicates";
 import { canonicalizeConflictUri } from "./conflictScmMenu";
 import {
   buildWorkspaceConflictOrder,
@@ -86,7 +87,7 @@ export class ConflictNavigation {
       await this.callbacks.revealConflict(file.uri, conflict);
       return true;
     }
-    if (file.gitUnmerged && file.locatedConflicts.length === 0) {
+    if (isGitOnlyUnresolved(file)) {
       this.pushHistory();
       return this.openMergeEditor(file.uri);
     }
@@ -201,7 +202,7 @@ export class ConflictNavigation {
     }
 
     const file = this.findFile(active.uri);
-    if (file === undefined || !file.gitUnmerged || file.locatedConflicts.length > 0) {
+    if (file === undefined || !isGitOnlyUnresolved(file)) {
       return false;
     }
 

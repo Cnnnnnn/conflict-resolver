@@ -8,6 +8,7 @@ import {
   shouldNotifyLocatedConflictsCleared,
   updateConflictWorkState,
 } from "../conflictCompletion";
+import { countGitOnlyFiles, countLocatedConflicts } from "../conflictPredicates";
 import type { ConflictSnapshot } from "../types";
 
 function snapshot(
@@ -16,10 +17,8 @@ function snapshot(
 ): ConflictSnapshot {
   return {
     files,
-    locatedCount: files.reduce((count, file) => count + file.locatedConflicts.length, 0),
-    gitOnlyCount: files.filter(
-      (file) => file.gitUnmerged && file.locatedConflicts.length === 0,
-    ).length,
+    locatedCount: countLocatedConflicts(files),
+    gitOnlyCount: countGitOnlyFiles(files),
     generatedAt: 1,
     ...overrides,
   };

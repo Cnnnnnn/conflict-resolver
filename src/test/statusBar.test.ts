@@ -4,13 +4,14 @@ import {
   getStatusBarState,
   type StatusBarItemAdapter,
 } from "../statusBar";
+import { countGitOnlyFiles, countLocatedConflicts } from "../conflictPredicates";
 import type { ConflictSnapshot } from "../types";
 
 const snapshot = (files: ConflictSnapshot["files"]): ConflictSnapshot => ({
   files,
   generatedAt: 0,
-  locatedCount: files.reduce((total, file) => total + file.locatedConflicts.length, 0),
-  gitOnlyCount: files.filter((file) => file.gitUnmerged && file.locatedConflicts.length === 0).length,
+  locatedCount: countLocatedConflicts(files),
+  gitOnlyCount: countGitOnlyFiles(files),
 });
 
 describe("getStatusBarState", () => {

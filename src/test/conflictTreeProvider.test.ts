@@ -12,6 +12,7 @@ import {
   type ConflictTreeFileItem,
   type ConflictTreeGroupItem,
 } from "../conflictTreeProvider";
+import { countGitOnlyFiles, countLocatedConflicts } from "../conflictPredicates";
 import type { ConflictSnapshot } from "../types";
 
 function toUri(filePath: string): string {
@@ -22,18 +23,13 @@ function createSnapshot(
   files: ConflictSnapshot["files"],
   overrides?: Partial<ConflictSnapshot>,
 ): ConflictSnapshot {
-  return {
+  const base: ConflictSnapshot = {
     files,
-    locatedCount: files.reduce(
-      (count, file) => count + file.locatedConflicts.length,
-      0,
-    ),
-    gitOnlyCount: files.filter(
-      (file) => file.gitUnmerged && file.locatedConflicts.length === 0,
-    ).length,
+    locatedCount: countLocatedConflicts(files),
+    gitOnlyCount: countGitOnlyFiles(files),
     generatedAt: 1_000_000_000_000,
-    ...overrides,
   };
+  return { ...base, ...overrides };
 }
 
 class FakeConflictStore {

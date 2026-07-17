@@ -22,6 +22,7 @@ import {
   updateConflictWorkState,
 } from "./conflictCompletion";
 import { createConflictFilter, isLockFilePath, type ConflictFilterMode } from "./conflictFilter";
+import { isGitOnlyUnresolved } from "./conflictPredicates";
 import { filterConflictCommands } from "./conflictCommandPalette";
 import {
   createConflictDiffPreviewer,
@@ -340,7 +341,7 @@ function registerScmConflictMenus(
         }
 
         const file = findConflictFile(store.getSnapshot(), uri);
-        if (file === undefined || !file.gitUnmerged || file.locatedConflicts.length > 0) {
+        if (file === undefined || !isGitOnlyUnresolved(file)) {
           await vscode.window.showInformationMessage("该文件没有需要 Merge Editor 处理的未知冲突");
           return;
         }
