@@ -155,4 +155,45 @@ describe("filterConflictCommands", () => {
     });
     expect(result.find((entry) => entry.command === "conflictResolver.undoLastAccept")).toBeUndefined();
   });
+
+  describe("cr namespace prefix", () => {
+    const locatedContext = {
+      snapshot: locatedSnapshot,
+      hasUndo: false,
+      scenarioInProgress: false,
+      markersCleared: false,
+    };
+
+    it("treats bare `cr` as listing everything visible", () => {
+      const bare = filterConflictCommands({ context: locatedContext });
+      const crOnly = filterConflictCommands({ query: "cr", context: locatedContext });
+      expect(crOnly.map((entry) => entry.command)).toEqual(
+        bare.map((entry) => entry.command),
+      );
+    });
+
+    it("strips `cr ` prefix before matching", () => {
+      const nextDirect = filterConflictCommands({ query: "下一", context: locatedContext });
+      const nextCr = filterConflictCommands({ query: "cr 下一", context: locatedContext });
+      expect(nextCr.map((entry) => entry.command)).toEqual(
+        nextDirect.map((entry) => entry.command),
+      );
+    });
+
+    it("case-insensitive prefix match", () => {
+      const upper = filterConflictCommands({ query: "CR next", context: locatedContext });
+      const lower = filterConflictCommands({ query: "cr next", context: locatedContext });
+      expect(upper.map((entry) => entry.command)).toEqual(
+        lower.map((entry) => entry.command),
+      );
+      expect(upper[0]?.command).toBe("conflictResolver.nextConflict");
+    });
+
+    it("does not strip `cr` mid-query", () => {
+      // "across" still fuzzy-matches `cr` subsequence; `cr` as a
+      // prefix is the namespace signal, not every occurrence.
+      const result = filterConflictCommands({ query: "across", context: locatedContext });
+      expect(result.length).toBe(0);
+    });
+  });
 });

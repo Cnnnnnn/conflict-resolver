@@ -44,233 +44,305 @@
     "commands": [
       {
         "command": "conflictResolver.nextConflict",
-        "title": "Conflict Resolver: Next Conflict",
+        "title": "Next Conflict",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(chevron-right)"
       },
       {
         "command": "conflictResolver.previousConflict",
-        "title": "Conflict Resolver: Previous Conflict",
+        "title": "Previous Conflict",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(chevron-left)"
       },
       {
         "command": "conflictResolver.nextConflictInFile",
-        "title": "Conflict Resolver: Next Conflict in File"
+        "title": "Next Conflict in File",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.previousConflictInFile",
-        "title": "Conflict Resolver: Previous Conflict in File"
+        "title": "Previous Conflict in File",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.nextFile",
-        "title": "Conflict Resolver: Next Conflict File",
+        "title": "Next Conflict File",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(chevron-down)"
       },
       {
         "command": "conflictResolver.previousFile",
-        "title": "Conflict Resolver: Previous Conflict File",
+        "title": "Previous Conflict File",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(chevron-up)"
       },
       {
         "command": "conflictResolver.firstConflictInActiveFile",
-        "title": "Conflict Resolver: Jump to First Conflict in Active File"
+        "title": "Jump to First Conflict in Active File",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.stageAllResolved",
-        "title": "Conflict Resolver: Stage All Resolved Conflicts",
+        "title": "Stage All Resolved Conflicts",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(check-all)"
       },
       {
         "command": "conflictResolver.openPanel",
-        "title": "Conflict Resolver: Open Conflict Panel"
+        "title": "Open Conflict Panel",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.quickPick",
-        "title": "Conflict Resolver: Quick Pick Command",
+        "title": "Quick Pick Command",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(list-filter)"
       },
       {
         "command": "conflictResolver.rescanCurrentFile",
-        "title": "Conflict Resolver: Rescan Current File"
+        "title": "Rescan Current File",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.openMergeEditor",
-        "title": "Conflict Resolver: Open Merge Editor"
+        "title": "Open Merge Editor",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.toggleLockFiles",
-        "title": "Conflict Resolver: Toggle Lock Files",
+        "title": "Toggle Lock Files",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(files-skip)"
       },
       {
         "command": "conflictResolver.scmPickConflict",
         "title": "选择冲突位置…",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated1",
         "title": "冲突 1",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated2",
         "title": "冲突 2",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated3",
         "title": "冲突 3",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated4",
         "title": "冲突 4",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated5",
         "title": "冲突 5",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated6",
         "title": "冲突 6",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated7",
         "title": "冲突 7",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated8",
         "title": "冲突 8",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated9",
         "title": "冲突 9",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated10",
         "title": "冲突 10",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated11",
         "title": "冲突 11",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated12",
         "title": "冲突 12",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated13",
         "title": "冲突 13",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated14",
         "title": "冲突 14",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated15",
         "title": "冲突 15",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated16",
         "title": "冲突 16",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated17",
         "title": "冲突 17",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated18",
         "title": "冲突 18",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated19",
         "title": "冲突 19",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmGotoLocated20",
         "title": "冲突 20",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.scmOpenMergeEditor",
         "title": "打开 Merge Editor",
-        "category": "Conflict Resolver"
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.batchAcceptCurrent",
-        "title": "Conflict Resolver: Accept Selected (Current)",
+        "title": "Accept Selected (Current)",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(check)"
       },
       {
         "command": "conflictResolver.batchAcceptIncoming",
-        "title": "Conflict Resolver: Accept Selected (Incoming)",
+        "title": "Accept Selected (Incoming)",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(arrow-right)"
       },
       {
         "command": "conflictResolver.batchAcceptBoth",
-        "title": "Conflict Resolver: Accept Selected (Both)",
+        "title": "Accept Selected (Both)",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(git-compare)"
       },
       {
         "command": "conflictResolver.treeSelectAll",
-        "title": "Conflict Resolver: Select All Conflicts",
+        "title": "Select All Conflicts",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(check-all)"
       },
       {
         "command": "conflictResolver.treeClearSelection",
-        "title": "Conflict Resolver: Clear Selection",
+        "title": "Clear Selection",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(close)"
       },
       {
         "command": "conflictResolver.treeSelectFile",
-        "title": "Conflict Resolver: Select Conflicts in File",
+        "title": "Select Conflicts in File",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(selection)"
       },
       {
         "command": "conflictResolver.treeFilterAll",
-        "title": "Conflict Resolver: Show All Conflicts"
+        "title": "Show All Conflicts",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.treeFilterSource",
-        "title": "Conflict Resolver: Show Source Conflicts Only"
+        "title": "Show Source Conflicts Only",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.treeFilterLock",
-        "title": "Conflict Resolver: Show Lock File Conflicts Only"
+        "title": "Show Lock File Conflicts Only",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.treeSearch",
-        "title": "Conflict Resolver: Search Conflicts"
+        "title": "Search Conflicts",
+        "category": "Conflict Resolver (cr)"
       },
       {
         "command": "conflictResolver.undoLastAccept",
-        "title": "Conflict Resolver: Undo Last Accept",
+        "title": "Undo Last Accept",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(discard)"
       },
       {
         "command": "conflictResolver.continueScenario",
-        "title": "Conflict Resolver: Continue Merge/Rebase/Cherry-pick",
+        "title": "Continue Merge/Rebase/Cherry-pick",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(debug-continue)"
       },
       {
         "command": "conflictResolver.back",
-        "title": "Conflict Resolver: Back to Previous Conflict",
+        "title": "Back to Previous Conflict",
+        "category": "Conflict Resolver (cr)",
         "icon": "$(arrow-left)"
+      }
+    ],
+    "commandPalette": [
+      {
+        "command": "conflictResolver.nextConflict",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.previousConflict",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.nextConflictInFile",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.previousConflictInFile",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.nextFile",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.previousFile",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.firstConflictInActiveFile",
+        "when": "conflictResolver.hasLocatedConflicts"
+      },
+      {
+        "command": "conflictResolver.stageAllResolved",
+        "when": "conflictResolver.markersCleared"
+      },
+      {
+        "command": "conflictResolver.continueScenario",
+        "when": "conflictResolver.scenarioInProgress"
+      },
+      {
+        "command": "conflictResolver.undoLastAccept",
+        "when": "conflictResolver.hasUndo"
+      },
+      {
+        "command": "conflictResolver.back",
+        "when": "conflictResolver.hasUndo"
       }
     ],
     "keybindings": [
@@ -595,6 +667,14 @@
           "default": false,
           "scope": "window",
           "markdownDescription": "场景继续（merge / rebase / cherry-pick）时静默执行。\n\n- `false`（默认）：打开临时终端，用户可在终端内交互\n- `true`：直接在子进程调用 `git <verb> --continue`，30 秒超时，结果通过通知显示"
+        },
+        "conflictResolver.maxUndoDepth": {
+          "type": "integer",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 200,
+          "scope": "window",
+          "markdownDescription": "保留的撤销批次上限。一次采纳（或一组批量采纳）作为一个撤销批次。\n\n- 较小的值（5–10）节省内存，但长会话中较早的批量采纳无法回退\n- 默认 20：约一个普通合并 session 的覆盖\n- 200 为硬上限，防止极端值打爆内存"
         }
       }
     },

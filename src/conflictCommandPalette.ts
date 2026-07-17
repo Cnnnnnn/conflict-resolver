@@ -265,11 +265,13 @@ export type PaletteFilterOptions = {
 
 export type FilteredPaletteEntry = ConflictPaletteEntry & { score: number };
 
+const CR_NAMESPACE_PREFIX = /^cr(?:\s|$)/i;
+
 export function filterConflictCommands({
   query = "",
   context,
 }: PaletteFilterOptions): FilteredPaletteEntry[] {
-  const trimmed = query.trim();
+  const trimmed = stripCrNamespace(query.trim());
   const visible = CONFLICT_PALETTE_COMMANDS.filter((entry) => entry.isVisible(context));
   const matched = visible.filter((entry) => matchesQuery(entry, trimmed));
   return matched
@@ -285,4 +287,16 @@ export function filterConflictCommands({
       }
       return left.label.localeCompare(right.label, "zh-CN");
     });
+}
+
+/**
+ * Strips the optional `cr ` namespace prefix from a palette query.
+ * A bare `cr` returns the unfiltered command list; `cr next` is
+ * treated as if the user typed just `next`. Makes the picker
+ * behave like an explicit namespace even though VS Code's command
+ * palette doesn't natively support per-extension namespace
+ * prefixes.
+ */
+function stripCrNamespace(query: string): string {
+  return query.replace(CR_NAMESPACE_PREFIX, "");
 }
