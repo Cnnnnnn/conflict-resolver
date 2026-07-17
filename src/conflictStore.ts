@@ -527,6 +527,10 @@ export class ConflictStore {
 
     const files = new Map<string, ConflictRecord>();
 
+    const gitFileEntries: Array<{
+      key: string;
+      file: GitUnmergedFile;
+    }> = [];
     for (const repositoryRoot of [...repositoryRoots].sort()) {
       const unmergedFiles = [...await this.git.listUnmergedFiles(repositoryRoot)].sort(
         (left, right) => {
@@ -543,13 +547,49 @@ export class ConflictStore {
       );
 
       for (const file of unmergedFiles) {
-        await this.mergeGitUnmergedFile(files, file, openDocumentsByKey);
+        gitFileEntries.push({ key: toConflictFileKey(file.uri), file });
       }
     }
 
+    // Group open documents by file key so the git + open-document merges for
+    // the same file run sequentially (their merge* helpers do read-modify-write
+    // on `files.get(key)`), while distinct files stay fully parallel.
+    const openDocumentsByEntryKey = new Map<string, typeof openDocumentState>();
     for (const entry of openDocumentState) {
-      await this.mergeOpenDocument(files, entry.document, entry.repositoryRoot, entry.key);
+      const bucket = openDocumentsByEntryKey.get(entry.key);
+      if (bucket === undefined) {
+        openDocumentsByEntryKey.set(entry.key, [entry]);
+      } else {
+        bucket.push(entry);
+      }
     }
+
+    const gitKeys = new Set(gitFileEntries.map((entry) => entry.key));
+    const workKeys = new Set<string>([...gitKeys, ...openDocumentsByEntryKey.keys()]);
+    await Promise.all(
+      [...workKeys].map(async (key) => {
+        for (const gitEntry of gitFileEntries) {
+          if (gitEntry.key === key) {
+            await this.mergeGitUnmergedFile(
+              files,
+              gitEntry.file,
+              openDocumentsByKey,
+            );
+          }
+        }
+        const documentEntries = openDocumentsByEntryKey.get(key);
+        if (documentEntries !== undefined) {
+          for (const entry of documentEntries) {
+            await this.mergeOpenDocument(
+              files,
+              entry.document,
+              entry.repositoryRoot,
+              entry.key,
+            );
+          }
+        }
+      }),
+    );
 
     const snapshotFiles = [...files.values()]
       .map((entry) => entry.file)
