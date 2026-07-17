@@ -27,8 +27,15 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
-      - run: npm run check
+      - name: Install dependencies
+        env:
+          # Override any user-level ~/.npmrc that points at a private registry.
+          # NPM_CONFIG_REGISTRY is the highest-priority npm config source and
+          # does not write to disk, so it leaves the runner environment clean.
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+        run: npm ci
+      - name: Check (tsc + vitest)
+        run: npm run check
 
   package:
     name: package (${{ matrix.os }})
@@ -44,7 +51,10 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - name: Install dependencies
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+        run: npm ci
       - name: Build VSIX
         run: npx @vscode/vsce package --no-dependencies
       - name: Upload VSIX (pull request)

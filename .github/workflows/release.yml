@@ -18,9 +18,14 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
-      - run: npm run check
-      - run: npx @vscode/vsce package --no-dependencies
+      - name: Install dependencies
+        env:
+          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+        run: npm ci
+      - name: Check
+        run: npm run check
+      - name: Package VSIX
+        run: npx @vscode/vsce package --no-dependencies
 
       - name: Dry-run summary
         shell: bash
