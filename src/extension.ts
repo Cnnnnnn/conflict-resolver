@@ -887,13 +887,17 @@ function registerConflictSubscriptions(
         }, DOCUMENT_UI_REFRESH_DEBOUNCE_MS);
       };
       return vscode.workspace.onDidChangeTextDocument((event) => {
+        // `document.getText()` materialises the full buffer; reading it
+        // more than once per keystroke doubles the cost on big files.
+        // Cache once and pass to the three downstream checks.
+        const text = event.document.getText();
         const changed = store.applyOpenDocumentText(
           event.document.uri.toString(),
-          event.document.getText(),
+          text,
         );
         if (
           changed ||
-          hasLocatedConflictMarkers(event.document.getText()) ||
+          hasLocatedConflictMarkers(text) ||
           isTrackedConflictDocument(event.document, store.getSnapshot())
         ) {
           scheduleUiRefresh();
