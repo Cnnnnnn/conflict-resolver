@@ -46,7 +46,7 @@ describe("createConflictUndoStore", () => {
     expect(store.size()).toBe(0);
   });
 
-  it("caps history depth at 20", () => {
+  it("caps history depth at 20 by default", () => {
     const store = createConflictUndoStore();
     for (let i = 0; i < 25; i += 1) {
       store.record([makeEntry(String(i), String(i))]);
@@ -63,6 +63,41 @@ describe("createConflictUndoStore", () => {
 
     const taken = store.take();
     expect(taken?.entries).toHaveLength(200);
+  });
+
+  it("respects a custom maxDepth", () => {
+    const store = createConflictUndoStore({ maxDepth: 5 });
+    for (let i = 0; i < 10; i += 1) {
+      store.record([makeEntry(String(i), String(i))]);
+    }
+    expect(store.size()).toBe(5);
+    // Oldest 5 batches were dropped; the surviving batch is the
+    // most recent one recorded.
+    expect(store.describe()).toBe("撤销：9");
+  });
+
+  it("clamps maxDepth values below 1 up to 1", () => {
+    const store = createConflictUndoStore({ maxDepth: 0 });
+    store.record([makeEntry("a", "a")]);
+    store.record([makeEntry("b", "b")]);
+    expect(store.size()).toBe(1);
+    expect(store.describe()).toBe("撤销：b");
+  });
+
+  it("clamps maxDepth values above 200 down to 200", () => {
+    const store = createConflictUndoStore({ maxDepth: 9999 });
+    for (let i = 0; i < 201; i += 1) {
+      store.record([makeEntry(String(i), String(i))]);
+    }
+    expect(store.size()).toBe(200);
+  });
+
+  it("falls back to the default when maxDepth is not a finite number", () => {
+    const store = createConflictUndoStore({ maxDepth: Number.NaN });
+    for (let i = 0; i < 25; i += 1) {
+      store.record([makeEntry(String(i), String(i))]);
+    }
+    expect(store.size()).toBe(20);
   });
 });
 

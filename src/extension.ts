@@ -1014,7 +1014,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       await vscode.window.showWarningMessage(`无法打开 Merge Editor：${uri}。${error instanceof Error ? error.message : String(error)}`);
     },
   });
-  const undoStore = createConflictUndoStore();
+  const undoStore = createConflictUndoStore({
+    maxDepth: vscode.workspace
+      .getConfiguration("conflictResolver")
+      .get<number>("maxUndoDepth", 20),
+  });
   const syncUndoContext = (): void => {
     void vscode.commands.executeCommand(
       "setContext",

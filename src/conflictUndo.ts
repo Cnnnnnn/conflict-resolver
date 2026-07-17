@@ -27,10 +27,15 @@ export type ConflictUndoStore = {
   describe(): string | undefined;
 };
 
-const MAX_UNDO_STACK = 20;
+const DEFAULT_MAX_UNDO_DEPTH = 20;
 const MAX_ENTRIES_PER_BATCH = 200;
+const MIN_MAX_UNDO_DEPTH = 1;
+const MAX_MAX_UNDO_DEPTH = 200;
 
-export function createConflictUndoStore(): ConflictUndoStore {
+export function createConflictUndoStore(options?: {
+  maxDepth?: number;
+}): ConflictUndoStore {
+  const maxDepth = clampMaxUndoDepth(options?.maxDepth ?? DEFAULT_MAX_UNDO_DEPTH);
   let stack: ConflictUndoBatch[] = [];
 
   return {
@@ -44,7 +49,7 @@ export function createConflictUndoStore(): ConflictUndoStore {
       const limited = entries.slice(0, MAX_ENTRIES_PER_BATCH);
       const label = deriveBatchLabel(limited);
       const batch: ConflictUndoBatch = { label, entries: limited };
-      stack = [batch, ...stack].slice(0, MAX_UNDO_STACK);
+      stack = [batch, ...stack].slice(0, maxDepth);
     },
     take() {
       const batch = stack[0];
@@ -65,6 +70,20 @@ export function createConflictUndoStore(): ConflictUndoStore {
       return `撤销：${batch.label}`;
     },
   };
+}
+
+function clampMaxUndoDepth(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_MAX_UNDO_DEPTH;
+  }
+  const rounded = Math.floor(value);
+  if (rounded < MIN_MAX_UNDO_DEPTH) {
+    return MIN_MAX_UNDO_DEPTH;
+  }
+  if (rounded > MAX_MAX_UNDO_DEPTH) {
+    return MAX_MAX_UNDO_DEPTH;
+  }
+  return rounded;
 }
 
 function deriveBatchLabel(entries: readonly ConflictUndoEntry[]): string {
