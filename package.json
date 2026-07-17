@@ -554,7 +554,8 @@
         "conflictResolver.includeLockFiles": {
           "type": "boolean",
           "default": false,
-          "description": "是否扫描 lock 文件（如 pnpm-lock.yaml、package-lock.json 等）。默认跳过以提升性能。"
+          "scope": "window",
+          "markdownDescription": "是否扫描 lock 文件（如 `pnpm-lock.yaml`、`package-lock.json` 等）。\n\n默认跳过以提升性能；遇到 lock 文件冲突需要批量采纳时打开。"
         },
         "conflictResolver.treeFilterMode": {
           "type": "string",
@@ -563,13 +564,20 @@
             "source",
             "lock"
           ],
+          "enumDescriptions": [
+            "全部冲突（默认）",
+            "仅源代码文件",
+            "仅 lock 文件"
+          ],
           "default": "all",
-          "description": "冲突面板的过滤模式：all = 全部，source = 仅源代码，lock = 仅 lock 文件。"
+          "scope": "window",
+          "markdownDescription": "冲突面板的过滤模式。\n\n- `all`：显示所有冲突\n- `source`：仅源代码文件，隐藏 lock 文件\n- `lock`：仅 lock 文件，便于批量一致化"
         },
         "conflictResolver.silentScenarioContinue": {
           "type": "boolean",
           "default": false,
-          "description": "场景继续时静默执行（不走终端，直接调 git --continue 并通过通知显示结果）。"
+          "scope": "window",
+          "markdownDescription": "场景继续（merge / rebase / cherry-pick）时静默执行。\n\n- `false`（默认）：打开临时终端，用户可在终端内交互\n- `true`：直接在子进程调用 `git <verb> --continue`，30 秒超时，结果通过通知显示"
         }
       }
     },
