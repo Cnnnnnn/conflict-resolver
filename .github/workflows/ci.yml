@@ -27,12 +27,12 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Use public npm registry
+        # Project-level .npmrc outranks the author's user-level ~/.npmrc,
+        # which points at an internal Nexus the runner cannot reach. The
+        # file is created per-job and never committed.
+        run: echo "registry=https://registry.npmjs.org/" > .npmrc
       - name: Install dependencies
-        env:
-          # Override any user-level ~/.npmrc that points at a private registry.
-          # NPM_CONFIG_REGISTRY is the highest-priority npm config source and
-          # does not write to disk, so it leaves the runner environment clean.
-          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
         run: npm ci
       - name: Check (tsc + vitest)
         run: npm run check
@@ -51,9 +51,9 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
+      - name: Use public npm registry
+        run: echo "registry=https://registry.npmjs.org/" > .npmrc
       - name: Install dependencies
-        env:
-          NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
         run: npm ci
       - name: Build VSIX
         run: npx @vscode/vsce package --no-dependencies
