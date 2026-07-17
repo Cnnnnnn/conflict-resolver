@@ -28,12 +28,14 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
-        # Use `npm install` (not `npm ci`) because package-lock.json's
-        # `resolved` URLs point at the author's internal Nexus, which
-        # the GitHub runner cannot reach. `npm install` re-resolves
-        # against the active registry while still honouring the lockfile
-        # versions and integrity hashes for reproducibility.
-        run: npm install --no-audit --registry=https://registry.npmjs.org/
+        # Drop package-lock.json: every `resolved` URL points at the
+        # author's internal Nexus, which the runner cannot reach.
+        # `npm install` regenerates a fresh lockfile against
+        # registry.npmjs.org. The regenerated file lives only in the
+        # job workspace and is never committed.
+        run: |
+          rm -f package-lock.json
+          npm install --no-audit --registry=https://registry.npmjs.org/
       - name: Check (tsc + vitest)
         run: npm run check
 
@@ -52,7 +54,9 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
-        run: npm install --no-audit --registry=https://registry.npmjs.org/
+        run: |
+          rm -f package-lock.json
+          npm install --no-audit --registry=https://registry.npmjs.org/
       - name: Build VSIX
         run: npx @vscode/vsce package --no-dependencies
       - name: Upload VSIX (pull request)
