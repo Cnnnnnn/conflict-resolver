@@ -67,6 +67,9 @@ jobs:
         run: |
           rm -f package-lock.json
           npm install --no-audit --registry=https://registry.npmjs.org/
+      - name: Compile
+        shell: bash
+        run: npm run compile
       - name: Build VSIX
         shell: bash
         run: npx @vscode/vsce package --no-dependencies
