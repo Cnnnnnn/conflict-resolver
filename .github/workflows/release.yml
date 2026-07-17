@@ -19,7 +19,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Use public npm registry
-        run: npm ci --registry=https://registry.npmjs.org/
+        run: npm install --no-audit --registry=https://registry.npmjs.org/
       - name: Check
         run: npm run check
       - name: Package VSIX

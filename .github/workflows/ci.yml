@@ -28,11 +28,12 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
-        # --registry is the highest-priority npm config source (beats
-        # project .npmrc, user ~/.npmrc, and lockfile `resolved` URLs).
-        # Needed because package-lock.json was generated against the
-        # author's internal Nexus, which the runner cannot reach.
-        run: npm ci --registry=https://registry.npmjs.org/
+        # Use `npm install` (not `npm ci`) because package-lock.json's
+        # `resolved` URLs point at the author's internal Nexus, which
+        # the GitHub runner cannot reach. `npm install` re-resolves
+        # against the active registry while still honouring the lockfile
+        # versions and integrity hashes for reproducibility.
+        run: npm install --no-audit --registry=https://registry.npmjs.org/
       - name: Check (tsc + vitest)
         run: npm run check
 
@@ -51,7 +52,7 @@ jobs:
           node-version: '22'
           cache: 'npm'
       - name: Install dependencies
-        run: npm ci --registry=https://registry.npmjs.org/
+        run: npm install --no-audit --registry=https://registry.npmjs.org/
       - name: Build VSIX
         run: npx @vscode/vsce package --no-dependencies
       - name: Upload VSIX (pull request)
