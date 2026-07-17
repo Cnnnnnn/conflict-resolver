@@ -1,7 +1,18 @@
+import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 import * as vscode from "vscode";
+
+// Same ceiling as gitRepositoryService so a stuck --continue cannot pin the
+// UI; the child is killed on timeout and the call rejects.
+const SCENARIO_CONTINUE_TIMEOUT_MS = 30_000;
+
+type ScenarioCommandResult = { stdout: string; stderr: string };
+export type ScenarioCommandRunner = (
+  args: readonly string[],
+  cwd: string,
+) => Promise<ScenarioCommandResult>;
 
 export type MergeScenarioKind = "merge" | "rebase" | "cherry-pick" | "none";
 
@@ -102,6 +113,7 @@ export function formatScenarioIcon(scenario: MergeScenario): string | undefined 
 export async function runScenarioContinue(
   scenario: MergeScenario,
   repositoryRoot: string | undefined,
+  options: { silent?: boolean; runCommand?: ScenarioCommandRunner } = {},
 ): Promise<{ ok: boolean; message: string }> {
   if (!scenario.inProgress || scenario.kind === "none" || scenario.continueCommand === undefined) {
     return { ok: false, message: "当前不在合并状态" };
@@ -110,16 +122,80 @@ export async function runScenarioContinue(
     return { ok: false, message: "未找到 Git 仓库根目录" };
   }
 
-  const terminal = vscode.window.createTerminal({
-    cwd: repositoryRoot,
-    name: `${SCENARIO_LABEL[scenario.kind]} continue`,
+  // Terminal mode keeps the user able to inspect / interact with the command;
+  // silent mode runs git directly and shows a notification with the outcome.
+  if (!options.silent) {
+    const terminal = vscode.window.createTerminal({
+      cwd: repositoryRoot,
+      name: `${SCENARIO_LABEL[scenario.kind]} continue`,
+    });
+    terminal.show();
+    terminal.sendText(scenario.continueCommand);
+    return {
+      ok: true,
+      message: `已在终端执行 ${scenario.continueCommand}`,
+    };
+  }
+
+  return runScenarioContinueSilent(
+    scenario,
+    repositoryRoot,
+    options.runCommand ?? defaultScenarioCommandRunner,
+  );
+}
+
+async function runScenarioContinueSilent(
+  scenario: MergeScenario,
+  repositoryRoot: string,
+  runCommand: ScenarioCommandRunner,
+): Promise<{ ok: boolean; message: string }> {
+  if (scenario.continueCommand === undefined) {
+    return { ok: false, message: "当前不在合并状态" };
+  }
+  // The continueCommand stores the full `git <verb> --continue`; we only
+  // need the verb + arguments, so drop the leading "git " when invoking
+  // execFile.
+  const commandTail = scenario.continueCommand.replace(/^git\s+/, "");
+  const args = commandTail.split(/\s+/).filter((part) => part.length > 0);
+
+  try {
+    const { stdout, stderr } = await runCommand(args, repositoryRoot);
+    const summary = stdout.trim() || stderr.trim() || "已执行";
+    const label = scenario.kind === "none" ? "" : SCENARIO_LABEL[scenario.kind];
+    return { ok: true, message: `${label} continue: ${summary}` };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      message: `${scenario.continueCommand} 失败：${message}`,
+    };
+  }
+}
+
+async function defaultScenarioCommandRunner(
+  args: readonly string[],
+  cwd: string,
+): Promise<ScenarioCommandResult> {
+  return new Promise<ScenarioCommandResult>((resolveFn, rejectFn) => {
+    execFile(
+      "git",
+      args,
+      { cwd, timeout: SCENARIO_CONTINUE_TIMEOUT_MS, encoding: "utf8" },
+      (error, stdout, stderr) => {
+        if (error !== null) {
+          rejectFn(error);
+          return;
+        }
+        const toText = (value: string | Buffer): string =>
+          typeof value === "string" ? value : String(value);
+        resolveFn({
+          stdout: toText(stdout),
+          stderr: toText(stderr),
+        });
+      },
+    );
   });
-  terminal.show();
-  terminal.sendText(scenario.continueCommand);
-  return {
-    ok: true,
-    message: `已在终端执行 ${scenario.continueCommand}`,
-  };
 }
 
 export function scenarioMatchesFile(

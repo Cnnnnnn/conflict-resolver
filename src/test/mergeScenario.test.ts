@@ -91,4 +91,54 @@ describe("runScenarioContinue", () => {
     );
     expect(result.ok).toBe(false);
   });
+
+  it("returns false when repositoryRoot is undefined", async () => {
+    const result = await runScenarioContinue(
+      { kind: "merge", inProgress: true, continueCommand: "git merge --continue" },
+      undefined,
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("runs the command in silent mode via the injected runner", async () => {
+    let captured: { args: readonly string[]; cwd: string } | undefined;
+    const result = await runScenarioContinue(
+      {
+        kind: "merge",
+        inProgress: true,
+        continueCommand: "git merge --continue",
+      },
+      workDir,
+      {
+        silent: true,
+        runCommand: async (args, cwd) => {
+          captured = { args, cwd };
+          return { stdout: "Merge made by the 'recursive' strategy.", stderr: "" };
+        },
+      },
+    );
+    expect(result.ok).toBe(true);
+    expect(captured?.args).toEqual(["merge", "--continue"]);
+    expect(captured?.cwd).toBe(workDir);
+    expect(result.message).toContain("Merge made");
+  });
+
+  it("surfaces runner failures in silent mode", async () => {
+    const result = await runScenarioContinue(
+      {
+        kind: "rebase",
+        inProgress: true,
+        continueCommand: "git rebase --continue",
+      },
+      workDir,
+      {
+        silent: true,
+        runCommand: async () => {
+          throw new Error("nothing to commit");
+        },
+      },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.message).toContain("nothing to commit");
+  });
 });

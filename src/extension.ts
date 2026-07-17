@@ -1068,10 +1068,16 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     vscode.commands.registerCommand("conflictResolver.continueScenario", async () => {
       await refreshScenario();
       const repoRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-      const result = await runScenarioContinue(activeScenario, repoRoot);
+      const silent = vscode.workspace
+        .getConfiguration("conflictResolver")
+        .get<boolean>("silentScenarioContinue", false);
+      const result = await runScenarioContinue(activeScenario, repoRoot, { silent });
       if (!result.ok) {
         await vscode.window.showWarningMessage(result.message);
         return;
+      }
+      if (silent) {
+        await vscode.window.showInformationMessage(result.message);
       }
       store.scheduleImmediateRefresh("scenario-continue");
     }),
