@@ -128,13 +128,16 @@
   - `mergeScenario.ts` 新增 `formatScenarioIcon`：merge=`$(git-merge)` / rebase=`$(history)` / cherry-pick=`$(git-cherry-pick)`
   - `statusBar.setScenarioIcon(icon)` 公开方法，`ensureScenarioUpToDate` 中调用
   - 状态栏文本前缀对应 codicon
-- [x] **跨平台 CI（Ubuntu + macOS）**：`.github/workflows/ci.yml` 升级为两 job × 两 OS 矩阵
+- [x] **跨平台 CI（Ubuntu + macOS + Windows）**：`.github/workflows/ci.yml` 三 job × 三 OS 矩阵全部通过
   - `test` job 跑 `npm install + npm run check`；`package` job `needs: test` 跑 `compile + vsce package`，PR 时上传 vsix artifact
   - `concurrency` 取消 in-flight，`fail-fast: false` 单次 run 看全平台
   - 踩坑：作者本机 `~/.npmrc` 把 registry 指向内部 Nexus + `package-lock.json` 的 `resolved` URL 已写死 Nexus，runner 无法到达；逐级尝试 `--registry` / `NPM_CONFIG_REGISTRY` / 项目 `.npmrc` / `npm install`（保留 lockfile）都被 lockfile 烧录的 URL 顶掉，最后在 CI 里 `rm package-lock.json && npm install --no-audit --registry=...` 让 lockfile 重新生成
   - Windows 默认 shell 是 PowerShell 7，`rm -f` 被解析为 `Remove-Item -Filter/-Force` 冲突，给多行 step 显式 `shell: bash`
   - `package` job 必须先 `npm run compile` 否则 vsce 报 `Extension entrypoint(s) missing`
-- [ ] **Windows 重新启用**：阻塞于 `src/test/conflictStore.test.ts` / `gitRepositoryService.test.ts` / `mergeScenario.test.ts` 中硬编码的 POSIX 路径（`/repo`、`/workspace/...`），以及 `path.relative` 在 Windows 上返回反斜杠与期望 forward slash 的不匹配。需要先做一次 path-normalisation pass：把 fixture 用 `path.resolve` 包成 OS-native、或在 `conflictStore` / `gitRepositoryService` 的 boundary 上做 toPosix 归一化
+- [x] **Windows 测试 fixture 路径归一化**：
+  - `mergeScenario.test.ts`：`/tmp/conflict-resolver-scenario-` 改用 `join(tmpdir(), ...)`
+  - `conflictStore.test.ts`：根常量用 `resolve(...)` 包成 OS-native；`FakeGitRepositoryService.findRepositoryRoot` 用 `toPosixWithLeadingSlash` 把 native 根路径对齐到 WHATWG URL pathname 形态（`/C:/repo/...`），让 prefix 检查跨平台工作
+  - `gitRepositoryService.test.ts`：`expect(realpath)` 用 `toPosixPath` 归一化，跟 `git rev-parse` 的 forward-slash 输出对齐
 
 ### 已存在（roadmap 误报，本次复查确认）
 
@@ -146,7 +149,6 @@
 
 - 场景继续按钮增加「静默模式」（不打开终端，直接走 `git --continue` 子进程）
 - 大仓库性能基准脚本（用于追踪优化效果）
-- Windows CI 启用（先做测试 fixture 路径归一化）
 
 ### 验证
 
