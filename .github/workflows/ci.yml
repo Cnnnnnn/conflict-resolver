@@ -20,13 +20,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # windows-latest is intentionally excluded for now: the unit-test
-        # fixtures in src/test/ hard-code POSIX-style paths ("/repo",
-        # "/workspace/...") and `path.relative` returns backslashes on
-        # Windows, breaking several snapshots. Adding Windows back is
-        # tracked separately — the fixtures need a path-normalisation
-        # pass before that becomes meaningful.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,8 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # See the test job for the windows exclusion rationale.
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

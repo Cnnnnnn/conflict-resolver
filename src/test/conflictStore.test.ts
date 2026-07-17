@@ -6,10 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConflictStore, type ConflictStoreDocument, type ConflictStoreDocumentLoader } from "../conflictStore";
 import type { GitUnmergedFile } from "../types";
 
-const REPOSITORY_ROOT = "/repo";
-const NESTED_REPOSITORY_ROOT = "/repo/packages/nested";
-const OTHER_REPOSITORY_ROOT = "/repo-other";
-const WORKTREE_REPOSITORY_ROOT = "/workspace/repo-worktree";
+// Resolve to an OS-native absolute path. On Windows `resolve("/repo")`
+// becomes `C:\repo`, which lets `path.relative` produce a valid
+// relative path inside the test repository. On linux/macos it stays
+// `/repo` and the assertions (which use forward slashes) still hold
+// because the production code calls `rebased.split(sep).join("/")`.
+const REPOSITORY_ROOT = resolve("/repo");
+const NESTED_REPOSITORY_ROOT = resolve("/repo/packages/nested");
+const OTHER_REPOSITORY_ROOT = resolve("/repo-other");
+const WORKTREE_REPOSITORY_ROOT = resolve("/workspace/repo-worktree");
 
 type FakeDocumentEntry = {
   loadedText: string;

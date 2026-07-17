@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 
@@ -26,6 +26,13 @@ async function runGit(cwd: string, args: readonly string[]): Promise<string> {
 
 async function createTempDirectory(prefix: string): Promise<string> {
   return mkdtemp(join(tmpdir(), prefix));
+}
+
+// `git rev-parse --show-toplevel` emits forward-slash paths even on
+// Windows; `realpath` returns native separators. Normalise so the test
+// can compare them on any platform.
+function toPosixPath(value: string): string {
+  return value.split(sep).join("/");
 }
 
 function createLsFilesOutput(
@@ -437,7 +444,7 @@ describe("GitRepositoryService", () => {
       pathToFileURL(conflictedFile).toString(),
     );
 
-    expect(discoveredRoot).toBe(await realpath(repositoryRoot));
+    expect(discoveredRoot).toBe(toPosixPath(await realpath(repositoryRoot)));
     await expect(service.listUnmergedFiles(repositoryRoot)).resolves.toEqual([
       {
         repositoryRoot,
