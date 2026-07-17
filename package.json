@@ -431,29 +431,121 @@
         }
       ],
       "conflictResolver.conflicts": [
-        { "command": "conflictResolver.scmPickConflict", "when": "resourcePath != conflictResolver.scmEditorResourcePath", "group": "1_00" },
-        { "command": "conflictResolver.scmGotoLocated1", "when": "conflictResolver.scmEditorSlot1 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_01" },
-        { "command": "conflictResolver.scmGotoLocated2", "when": "conflictResolver.scmEditorSlot2 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_02" },
-        { "command": "conflictResolver.scmGotoLocated3", "when": "conflictResolver.scmEditorSlot3 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_03" },
-        { "command": "conflictResolver.scmGotoLocated4", "when": "conflictResolver.scmEditorSlot4 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_04" },
-        { "command": "conflictResolver.scmGotoLocated5", "when": "conflictResolver.scmEditorSlot5 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_05" },
-        { "command": "conflictResolver.scmGotoLocated6", "when": "conflictResolver.scmEditorSlot6 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_06" },
-        { "command": "conflictResolver.scmGotoLocated7", "when": "conflictResolver.scmEditorSlot7 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_07" },
-        { "command": "conflictResolver.scmGotoLocated8", "when": "conflictResolver.scmEditorSlot8 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_08" },
-        { "command": "conflictResolver.scmGotoLocated9", "when": "conflictResolver.scmEditorSlot9 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_09" },
-        { "command": "conflictResolver.scmGotoLocated10", "when": "conflictResolver.scmEditorSlot10 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_10" },
-        { "command": "conflictResolver.scmGotoLocated11", "when": "conflictResolver.scmEditorSlot11 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_11" },
-        { "command": "conflictResolver.scmGotoLocated12", "when": "conflictResolver.scmEditorSlot12 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_12" },
-        { "command": "conflictResolver.scmGotoLocated13", "when": "conflictResolver.scmEditorSlot13 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_13" },
-        { "command": "conflictResolver.scmGotoLocated14", "when": "conflictResolver.scmEditorSlot14 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_14" },
-        { "command": "conflictResolver.scmGotoLocated15", "when": "conflictResolver.scmEditorSlot15 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_15" },
-        { "command": "conflictResolver.scmGotoLocated16", "when": "conflictResolver.scmEditorSlot16 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_16" },
-        { "command": "conflictResolver.scmGotoLocated17", "when": "conflictResolver.scmEditorSlot17 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_17" },
-        { "command": "conflictResolver.scmGotoLocated18", "when": "conflictResolver.scmEditorSlot18 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_18" },
-        { "command": "conflictResolver.scmGotoLocated19", "when": "conflictResolver.scmEditorSlot19 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_19" },
-        { "command": "conflictResolver.scmGotoLocated20", "when": "conflictResolver.scmEditorSlot20 && resourcePath == conflictResolver.scmEditorResourcePath", "group": "1_20" },
-        { "command": "conflictResolver.scmOpenMergeEditor", "when": "conflictResolver.scmEditorGitOnly && resourcePath == conflictResolver.scmEditorResourcePath", "group": "2_merge" },
-        { "command": "conflictResolver.scmOpenMergeEditor", "when": "conflictResolver.hasGitOnlyMergeFiles && resourcePath != conflictResolver.scmEditorResourcePath", "group": "2_merge" }
+        {
+          "command": "conflictResolver.scmPickConflict",
+          "when": "resourcePath != conflictResolver.scmEditorResourcePath",
+          "group": "1_00"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated1",
+          "when": "conflictResolver.scmEditorSlot1 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_01"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated2",
+          "when": "conflictResolver.scmEditorSlot2 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_02"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated3",
+          "when": "conflictResolver.scmEditorSlot3 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_03"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated4",
+          "when": "conflictResolver.scmEditorSlot4 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_04"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated5",
+          "when": "conflictResolver.scmEditorSlot5 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_05"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated6",
+          "when": "conflictResolver.scmEditorSlot6 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_06"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated7",
+          "when": "conflictResolver.scmEditorSlot7 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_07"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated8",
+          "when": "conflictResolver.scmEditorSlot8 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_08"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated9",
+          "when": "conflictResolver.scmEditorSlot9 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_09"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated10",
+          "when": "conflictResolver.scmEditorSlot10 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_10"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated11",
+          "when": "conflictResolver.scmEditorSlot11 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_11"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated12",
+          "when": "conflictResolver.scmEditorSlot12 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_12"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated13",
+          "when": "conflictResolver.scmEditorSlot13 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_13"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated14",
+          "when": "conflictResolver.scmEditorSlot14 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_14"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated15",
+          "when": "conflictResolver.scmEditorSlot15 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_15"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated16",
+          "when": "conflictResolver.scmEditorSlot16 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_16"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated17",
+          "when": "conflictResolver.scmEditorSlot17 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_17"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated18",
+          "when": "conflictResolver.scmEditorSlot18 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_18"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated19",
+          "when": "conflictResolver.scmEditorSlot19 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_19"
+        },
+        {
+          "command": "conflictResolver.scmGotoLocated20",
+          "when": "conflictResolver.scmEditorSlot20 && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "1_20"
+        },
+        {
+          "command": "conflictResolver.scmOpenMergeEditor",
+          "when": "conflictResolver.scmEditorGitOnly && resourcePath == conflictResolver.scmEditorResourcePath",
+          "group": "2_merge"
+        },
+        {
+          "command": "conflictResolver.scmOpenMergeEditor",
+          "when": "conflictResolver.hasGitOnlyMergeFiles && resourcePath != conflictResolver.scmEditorResourcePath",
+          "group": "2_merge"
+        }
       ]
     },
     "configuration": {
@@ -466,9 +558,18 @@
         },
         "conflictResolver.treeFilterMode": {
           "type": "string",
-          "enum": ["all", "source", "lock"],
+          "enum": [
+            "all",
+            "source",
+            "lock"
+          ],
           "default": "all",
           "description": "冲突面板的过滤模式：all = 全部，source = 仅源代码，lock = 仅 lock 文件。"
+        },
+        "conflictResolver.silentScenarioContinue": {
+          "type": "boolean",
+          "default": false,
+          "description": "场景继续时静默执行（不走终端，直接调 git --continue 并通过通知显示结果）。"
         }
       }
     },
@@ -496,11 +597,14 @@
     "check": "npm run compile && npm run test:unit",
     "package": "vsce package",
     "publish:marketplace": "vsce publish",
-    "publish:openvsx": "ovsx publish"
+    "publish:openvsx": "ovsx publish",
+    "bench": "tsx scripts/benchmark.ts",
+    "bench:large": "tsx scripts/benchmark.ts --large"
   },
   "devDependencies": {
     "@types/node": "18.17.19",
     "@types/vscode": "1.85.0",
+    "tsx": "^4.23.0",
     "typescript": "5.8.3",
     "vite": "6.3.5",
     "vitest": "3.2.4"
