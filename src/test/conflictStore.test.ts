@@ -25,6 +25,17 @@ function toUri(filePath: string): string {
   return pathToFileURL(filePath).toString();
 }
 
+// Convert a native-separator absolute path to the shape WHATWG URL
+// `pathname` returns on every platform: forward slashes, with a
+// leading "/" that survives even drive-prefixed paths (`C:\repo` ->
+// `/C:/repo`). Used by FakeGitRepositoryService so its prefix check
+// matches what production code sees when comparing repo roots to
+// file URLs.
+function toPosixWithLeadingSlash(value: string): string {
+  const posix = value.split(sep).join("/");
+  return posix.startsWith("/") ? posix : `/${posix}`;
+}
+
 class FakeDocument implements ConflictStoreDocument {
   readonly uri: string;
   private readonly text: string;
@@ -135,26 +146,26 @@ class FakeDocumentLoader implements ConflictStoreDocumentLoader {
 
 class FakeGitRepositoryService {
   readonly findRepositoryRoot = vi.fn(async (uri: string) => {
-    // `URL#pathname` returns forward slashes on every platform (per the
-    // WHATWG URL spec). Normalise the native-separator repo roots so
-    // the prefix check works on Windows where `resolve("/repo")`
-    // yields `C:\repo`.
-    const absolutePath = new URL(uri).pathname;
+    // WHATWG URL paths are always POSIX-shaped (`/C:/repo/src/a.ts` on
+    // Windows, `/repo/src/a.ts` on linux). Native-separator roots need
+    // to be converted to POSIX AND gain the same leading slash so a
+    // plain prefix check works everywhere.
+    const urlPath = new URL(uri).pathname;
     const posixRoots = [...this.knownRepositoryRoots].map((root) =>
-      root.split(sep).join("/"),
+      toPosixWithLeadingSlash(root),
     );
     const matchingRoots = posixRoots.filter(
       (repositoryRoot) =>
-        absolutePath === repositoryRoot ||
-        absolutePath.startsWith(`${repositoryRoot}/`),
+        urlPath === repositoryRoot ||
+        urlPath.startsWith(`${repositoryRoot}/`),
     );
     if (matchingRoots.length === 0) {
       return undefined;
     }
 
     matchingRoots.sort((left, right) => right.length - left.length);
-    // Return the longest match in native form (the production code
-    // normalises with `resolve` and POSIX-joins the segments itself).
+    // Return the longest match in native form (production code re-runs
+    // `resolve` and `rebased.split(sep).join("/")` itself).
     const matchedIndex = posixRoots.indexOf(matchingRoots[0]);
     return [...this.knownRepositoryRoots][matchedIndex];
   });
